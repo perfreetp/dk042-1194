@@ -6,6 +6,7 @@ import type { Requirement } from '@/types';
 interface ChartFilters {
   region: string;
   module: string;
+  status: string;
   period: string;
 }
 
@@ -39,6 +40,9 @@ export function ResponseTimeChart({ height = 350, filters }: ResponseTimeChartPr
     }
     if (filters?.module && filters.module !== 'all') {
       result = result.filter(r => r.module === filters.module);
+    }
+    if (filters?.status && filters.status !== 'all') {
+      result = result.filter(r => r.status === filters.status);
     }
     return result;
   }, [requirements, stores, filters]);

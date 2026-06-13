@@ -6,6 +6,7 @@ import { MODULE_LABELS } from '@/utils/constants';
 interface ChartFilters {
   region: string;
   module: string;
+  status: string;
   period: string;
 }
 
@@ -29,6 +30,9 @@ export function RegionChart({ height = 350, filters, onChartClick }: RegionChart
     }
     if (filters?.module && filters.module !== 'all') {
       result = result.filter(r => r.module === filters.module);
+    }
+    if (filters?.status && filters.status !== 'all') {
+      result = result.filter(r => r.status === filters.status);
     }
     return result;
   }, [requirements, filters]);

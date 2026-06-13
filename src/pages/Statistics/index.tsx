@@ -11,19 +11,20 @@ import { StatusChart } from './StatusChart';
 import { ResponseTimeChart } from './ResponseTimeChart';
 import { StatsTable } from './StatsTable';
 import { formatPercent } from '@/utils/format';
-import type { ModuleType, RequirementStatus } from '@/types';
-import { MODULE_LABELS } from '@/utils/constants';
+import type { ModuleType, RequirementStatus, FilterOptions } from '@/types';
+import { MODULE_LABELS, STATUS_LABELS } from '@/utils/constants';
 
 interface ChartFilters {
   region: string;
   module: string;
+  status: string;
   period: string;
 }
 
 interface DrillDownFilter {
-  region?: string[];
-  module?: ModuleType[];
-  status?: RequirementStatus[];
+  region?: string;
+  module?: ModuleType;
+  status?: RequirementStatus;
 }
 
 export default function Statistics() {
@@ -32,12 +33,13 @@ export default function Statistics() {
   const stores = useAppStore((state) => state.stores);
   const versions = useAppStore((state) => state.versions);
   const users = useAppStore((state) => state.users);
+  const filters = useAppStore((state) => state.filters);
   const setFilters = useAppStore((state) => state.setFilters);
-  const resetFilters = useAppStore((state) => state.resetFilters);
 
-  const [selectedRegion, setSelectedRegion] = useState<string>('all');
-  const [selectedModule, setSelectedModule] = useState<string>('all');
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('all');
+  const [selectedRegion, setSelectedRegion] = useState<string>(filters.region ? (Array.isArray(filters.region) ? filters.region[0] : filters.region) : 'all');
+  const [selectedModule, setSelectedModule] = useState<string>(filters.module ? (Array.isArray(filters.module) ? filters.module[0] : filters.module) : 'all');
+  const [selectedStatus, setSelectedStatus] = useState<string>(filters.status ? (Array.isArray(filters.status) ? filters.status[0] : filters.status) : 'all');
+  const [selectedPeriod, setSelectedPeriod] = useState<string>((filters.period as string) || 'all');
 
   const regions = Array.from(new Set(stores.map(s => s.region)));
   const regionOptions = [
@@ -54,6 +56,19 @@ export default function Statistics() {
     { value: 'other', label: '其他' },
   ];
 
+  const statusOptions = [
+    { value: 'all', label: '全部状态' },
+    { value: 'pending', label: STATUS_LABELS.pending },
+    { value: 'reviewing', label: STATUS_LABELS.reviewing },
+    { value: 'approved', label: STATUS_LABELS.approved },
+    { value: 'scheduled', label: STATUS_LABELS.scheduled },
+    { value: 'developing', label: STATUS_LABELS.developing },
+    { value: 'testing', label: STATUS_LABELS.testing },
+    { value: 'released', label: STATUS_LABELS.released },
+    { value: 'rejected', label: STATUS_LABELS.rejected },
+    { value: 'deferred', label: STATUS_LABELS.deferred },
+  ];
+
   const periodOptions = [
     { value: 'all', label: '全部时间' },
     { value: '7d', label: '近7天' },
@@ -64,16 +79,18 @@ export default function Statistics() {
   const chartFilters: ChartFilters = {
     region: selectedRegion,
     module: selectedModule,
+    status: selectedStatus,
     period: selectedPeriod,
   };
 
-  const { totalCount, pendingCount, closedCount, avgResponseTime, avgCloseRate, topModule } = useMemo(() => {
+  const { filteredRequirements, totalCount, pendingCount, closedCount, avgResponseTime, avgCloseRate, topModule } = useMemo(() => {
     const filtered = requirements.filter(r => {
       if (selectedRegion !== 'all') {
         const store = stores.find(s => s.id === r.storeId);
         if (!store || store.region !== selectedRegion) return false;
       }
       if (selectedModule !== 'all' && r.module !== selectedModule) return false;
+      if (selectedStatus !== 'all' && r.status !== selectedStatus) return false;
 
       if (selectedPeriod !== 'all') {
         const days = selectedPeriod === '7d' ? 7 : selectedPeriod === '30d' ? 30 : 90;
@@ -107,6 +124,7 @@ export default function Statistics() {
     const top = moduleCounts.sort((a, b) => b.count - a.count)[0];
 
     return {
+      filteredRequirements: filtered,
       totalCount: total,
       pendingCount: pending,
       closedCount: closed,
@@ -114,7 +132,7 @@ export default function Statistics() {
       avgCloseRate: closeRate,
       topModule: top,
     };
-  }, [requirements, stores, selectedRegion, selectedModule, selectedPeriod]);
+  }, [requirements, stores, selectedRegion, selectedModule, selectedStatus, selectedPeriod]);
 
   const getModuleLabel = (module: string) => {
     const labels: Record<string, string> = {
@@ -128,9 +146,32 @@ export default function Statistics() {
   };
 
   const handleDrillDown = (filter: DrillDownFilter) => {
-    resetFilters();
+    const newFilters: Partial<FilterOptions> = {
+      period: selectedPeriod === 'all' ? undefined : (selectedPeriod as FilterOptions['period']),
+    };
+
+    if (selectedRegion !== 'all') {
+      newFilters.region = selectedRegion;
+    }
+    if (selectedModule !== 'all') {
+      newFilters.module = selectedModule as ModuleType;
+    }
+    if (selectedStatus !== 'all') {
+      newFilters.status = selectedStatus as RequirementStatus;
+    }
+
+    if (filter.region) {
+      newFilters.region = filter.region;
+    }
+    if (filter.module) {
+      newFilters.module = filter.module;
+    }
+    if (filter.status) {
+      newFilters.status = filter.status;
+    }
+
+    setFilters(newFilters);
     setTimeout(() => {
-      setFilters(filter);
       navigate('/board');
     }, 0);
   };
@@ -148,9 +189,9 @@ export default function Statistics() {
 
   const onRegionChartClick = (params: any) => {
     if (params.componentType === 'xAxis') {
-      handleDrillDown({ region: [params.value] });
+      handleDrillDown({ region: params.value });
     } else if (params.name && regions.includes(params.name)) {
-      handleDrillDown({ region: [params.name] });
+      handleDrillDown({ region: params.name });
     }
   };
 
@@ -158,7 +199,7 @@ export default function Statistics() {
     if (params.name) {
       const moduleKey = Object.entries(MODULE_LABELS).find(([_, l]) => l === params.name)?.[0] as ModuleType;
       if (moduleKey) {
-        handleDrillDown({ module: [moduleKey] });
+        handleDrillDown({ module: moduleKey });
       }
     }
   };
@@ -166,9 +207,9 @@ export default function Statistics() {
   const onStatusChartClick = (params: any) => {
     if (params.componentType === 'xAxis' || params.name) {
       const statusLabel = params.value || params.name;
-      const statusKey = StatusLabelsMap[statusLabel];
+      const statusKey = StatusLabelsMap[statusLabel] || statusLabel;
       if (statusKey) {
-        handleDrillDown({ status: [statusKey] });
+        handleDrillDown({ status: statusKey as RequirementStatus });
       }
     }
   };
@@ -178,7 +219,7 @@ export default function Statistics() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">统计报表</h1>
-          <p className="text-sm text-gray-500 mt-1">多维度分析门店诉求，跟踪闭环效果 · 点击图表可跳转看板查看明细</p>
+          <p className="text-sm text-gray-500 mt-1">多维度分析门店诉求，跟踪闭环效果 · 点击图表可跳转看板查看明细，筛选条件自动保留</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
@@ -199,6 +240,12 @@ export default function Statistics() {
               value={selectedModule}
               onChange={(e) => setSelectedModule(e.target.value)}
               options={moduleOptions}
+              className="w-28 h-9 text-sm"
+            />
+            <Select
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+              options={statusOptions}
               className="w-28 h-9 text-sm"
             />
           </div>
@@ -351,7 +398,7 @@ export default function Statistics() {
         </Card>
       </div>
 
-      <StatsTable />
+      <StatsTable filters={chartFilters} />
     </div>
   );
 }

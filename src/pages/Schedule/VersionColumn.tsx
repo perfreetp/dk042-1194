@@ -168,7 +168,7 @@ export function VersionColumn({ version, requirements, onEdit, onAnnounce, isUns
                 </div>
               )}
 
-              {isDelayed && requirements.length > 0 && !version.mitigationPlan && (
+              {isDelayed && requirements.length > 0 && (
                 <div className="mt-2 p-2 bg-white/70 rounded-md border border-gray-200/60">
                   <p className="text-[11px] text-gray-600 mb-1 flex items-center gap-1">
                     <ShieldAlert className="w-3 h-3" />

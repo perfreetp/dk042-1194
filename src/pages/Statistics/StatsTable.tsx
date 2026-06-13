@@ -7,16 +7,48 @@ import { formatDate, formatDuration } from '@/utils/format';
 import { ArrowUpRight, Clock } from 'lucide-react';
 import { formatPercent } from '@/utils/format';
 
-export function StatsTable() {
+interface ChartFilters {
+  region: string;
+  module: string;
+  status: string;
+  period: string;
+}
+
+interface StatsTableProps {
+  filters?: ChartFilters;
+}
+
+export function StatsTable({ filters }: StatsTableProps) {
   const requirements = useAppStore((state) => state.requirements);
   const stores = useAppStore((state) => state.stores);
   const users = useAppStore((state) => state.users);
   const getStoreById = useAppStore((state) => state.getStoreById);
   const getUserById = useAppStore((state) => state.getUserById);
+
+  const filteredRequirements = useMemo(() => {
+    let result = requirements.filter(r => !r.isHidden);
+    if (filters?.period && filters.period !== 'all') {
+      const days = filters.period === '7d' ? 7 : filters.period === '30d' ? 30 : 90;
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      result = result.filter(r => new Date(r.createdAt) >= cutoff);
+    }
+    if (filters?.region && filters.region !== 'all') {
+      const regionStores = stores.filter(s => s.region === filters.region).map(s => s.id);
+      result = result.filter(r => regionStores.includes(r.storeId));
+    }
+    if (filters?.module && filters.module !== 'all') {
+      result = result.filter(r => r.module === filters.module);
+    }
+    if (filters?.status && filters.status !== 'all') {
+      result = result.filter(r => r.status === filters.status);
+    }
+    return result;
+  }, [requirements, stores, filters]);
   
   const storeStats = useMemo(() => {
     return stores.map(store => {
-      const storeReqs = requirements.filter(r => r.storeId === store.id);
+      const storeReqs = filteredRequirements.filter(r => r.storeId === store.id);
       const total = storeReqs.length;
       const closed = storeReqs.filter(r => r.status === 'released').length;
       const avgResponse = total > 0
@@ -37,12 +69,12 @@ export function StatsTable() {
         latestReq,
       };
     }).sort((a, b) => b.total - a.total);
-  }, [requirements, stores]);
+  }, [filteredRequirements, stores]);
   
   const moduleStats = useMemo(() => {
     const modules = ['pos', 'inventory', 'member', 'report', 'other'];
     return modules.map(module => {
-      const moduleReqs = requirements.filter(r => r.module === module);
+      const moduleReqs = filteredRequirements.filter(r => r.module === module);
       const total = moduleReqs.length;
       const closed = moduleReqs.filter(r => r.status === 'released').length;
       const avgResponse = total > 0
@@ -60,13 +92,13 @@ export function StatsTable() {
         avgResponse,
       };
     }).sort((a, b) => b.total - a.total);
-  }, [requirements]);
+  }, [filteredRequirements]);
   
   const regionStats = useMemo(() => {
     const regions = Array.from(new Set(stores.map(s => s.region)));
     return regions.map(region => {
       const regionStores = stores.filter(s => s.region === region).map(s => s.id);
-      const regionReqs = requirements.filter(r => regionStores.includes(r.storeId));
+      const regionReqs = filteredRequirements.filter(r => regionStores.includes(r.storeId));
       const total = regionReqs.length;
       const closed = regionReqs.filter(r => r.status === 'released').length;
       const avgResponse = total > 0
@@ -84,7 +116,7 @@ export function StatsTable() {
         avgResponse,
       };
     }).sort((a, b) => b.total - a.total);
-  }, [requirements, stores]);
+  }, [filteredRequirements, stores]);
   
   return (
     <div className="space-y-6">

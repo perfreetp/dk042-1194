@@ -56,6 +56,7 @@ export interface Requirement {
   statusHistory: StatusHistory[];
   mergedFromIds?: string[];
   isHidden?: boolean;
+  batchOperationId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -69,6 +70,7 @@ export interface Review {
   materialsNeeded?: string[];
   reviewedAt: string;
   reviewerId: string;
+  batchOperationId?: string;
 }
 
 export interface StatusHistory {
@@ -79,6 +81,7 @@ export interface StatusHistory {
   reason?: string;
   changedAt: string;
   operatorId: string;
+  batchOperationId?: string;
 }
 
 export interface Version {
@@ -104,11 +107,55 @@ export interface Announcement {
 }
 
 export interface FilterOptions {
-  status?: RequirementStatus[];
-  module?: ModuleType[];
-  region?: string[];
-  priority?: Priority[];
-  assigneeId?: string[];
+  status?: RequirementStatus[] | RequirementStatus;
+  module?: ModuleType[] | ModuleType;
+  region?: string[] | string;
+  priority?: Priority[] | Priority;
+  assigneeId?: string[] | string;
   search?: string;
   dateRange?: [string, string];
+  period?: '7d' | '30d' | '90d' | 'all';
+}
+
+export type GroupByType = 'module' | 'region' | 'titleSimilarity';
+
+export interface ReviewGroup {
+  id: string;
+  name: string;
+  type: GroupByType;
+  requirementIds: string[];
+  assigneeId?: string;
+  priority?: Priority;
+  reviewComment?: string;
+  status?: RequirementStatus;
+}
+
+export interface BatchOperation {
+  id: string;
+  type: 'batchReview' | 'batchMerge';
+  operatorId: string;
+  createdAt: string;
+  totalCount: number;
+  groupCount: number;
+  requirementIds: string[];
+  summary: string;
+}
+
+export interface CapacityPreview {
+  versionId: string;
+  currentWorkload: number;
+  addedWorkload: number;
+  newWorkload: number;
+  capacity: number;
+  utilizationPercent: number;
+  isOverloaded: boolean;
+  isNearCapacity: boolean;
+  p0Count: number;
+  p1Count: number;
+  newP0Count: number;
+  newP1Count: number;
+  riskLevel: 'low' | 'medium' | 'high';
+  newRiskLevel: 'low' | 'medium' | 'high';
+  estimatedDelayDays: number;
+  addedRequirements: string[];
 }

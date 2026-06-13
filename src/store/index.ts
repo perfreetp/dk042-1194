@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Requirement, Review, Version, Announcement, FilterOptions, StatusHistory, User, Store as StoreType, ReviewConclusion } from '@/types';
+import type { Requirement, Review, Version, Announcement, FilterOptions, StatusHistory, User, Store as StoreType, ReviewConclusion, ReviewGroup, BatchOperation, CapacityPreview, GroupByType, Priority } from '@/types';
 import { mockRequirements, mockReviews, mockVersions, mockAnnouncements, mockUsers, mockStores } from '@/mock';
 import { generateId } from '@/utils/format';
 
@@ -12,6 +12,7 @@ interface AppState {
   users: User[];
   stores: StoreType[];
   statusHistory: StatusHistory[];
+  batchOperations: BatchOperation[];
   currentUser: User | null;
   filters: FilterOptions;
   addRequirement: (req: Omit<Requirement, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'statusHistory'>, asDraft?: boolean) => void;
@@ -20,6 +21,11 @@ interface AppState {
   deleteRequirement: (id: string) => void;
   mergeRequirements: (primaryId: string, mergedIds: string[]) => void;
   batchReview: (requirementIds: string[], updates: { assigneeId?: string; priority?: Requirement['priority']; reviewComment?: string; status?: Requirement['status'] }) => void;
+  batchReviewGrouped: (groups: ReviewGroup[], allRequirementIds: string[]) => void;
+  calculateCapacityPreview: (versionId: string, requirementIdsToAdd: string[]) => CapacityPreview;
+  calculateWorkload: (requirements: Requirement[]) => number;
+  calculateRiskLevel: (p0Count: number, p1Count: number, workload: number, capacity: number) => 'low' | 'medium' | 'high';
+  groupRequirements: (requirementIds: string[], groupBy: GroupByType) => ReviewGroup[];
   setFilters: (filters: Partial<FilterOptions>) => void;
   resetFilters: () => void;
   addReview: (review: Omit<Review, 'id' | 'reviewedAt'>) => void;
@@ -33,6 +39,7 @@ interface AppState {
   getUserById: (id: string) => User | undefined;
   getVersionById: (id: string) => Version | undefined;
   getReviewsByRequirementId: (requirementId: string) => Review[];
+  getBatchOperationById: (id: string) => BatchOperation | undefined;
   getFilteredRequirements: () => Requirement[];
   getVisibleRequirements: () => Requirement[];
 }
@@ -47,6 +54,7 @@ export const useAppStore = create<AppState>()(
       users: mockUsers,
       stores: mockStores,
       statusHistory: [],
+      batchOperations: [],
       currentUser: mockUsers[0],
       filters: {},
 
@@ -153,15 +161,30 @@ export const useAppStore = create<AppState>()(
         );
         if (validIds.length === 0) return;
 
+        const batchOpId = generateId();
         const newReviews: Review[] = [];
         const newHistories: StatusHistory[] = [];
+        const hasAnyChange = updates.assigneeId || updates.priority || updates.status || updates.reviewComment?.trim();
+        if (!hasAnyChange) return;
+
+        const batchOp: BatchOperation = {
+          id: batchOpId,
+          type: 'batchReview',
+          operatorId: state.currentUser?.id || '',
+          createdAt: now,
+          totalCount: validIds.length,
+          groupCount: 1,
+          requirementIds: validIds,
+          summary: `批量评审 ${validIds.length} 项需求`,
+        };
 
         set((s) => ({
           requirements: s.requirements.map((r) => {
             if (!validIds.includes(r.id)) return r;
-            const reqUpdates: Partial<Requirement> = { updatedAt: now };
+            const reqUpdates: Partial<Requirement> = { updatedAt: now, batchOperationId: batchOpId };
             if (updates.assigneeId) reqUpdates.assigneeId = updates.assigneeId;
             if (updates.priority) reqUpdates.priority = updates.priority;
+
             if (updates.status && updates.status !== r.status) {
               const history: StatusHistory = {
                 id: generateId(),
@@ -171,6 +194,7 @@ export const useAppStore = create<AppState>()(
                 reason: updates.reviewComment,
                 changedAt: now,
                 operatorId: s.currentUser?.id || '',
+                batchOperationId: batchOpId,
               };
               newHistories.push(history);
               reqUpdates.status = updates.status;
@@ -186,13 +210,28 @@ export const useAppStore = create<AppState>()(
                   comment: updates.reviewComment || '批量评审处理',
                   reviewedAt: now,
                   reviewerId: s.currentUser?.id || '',
+                  batchOperationId: batchOpId,
                 });
               }
+            } else if (updates.reviewComment?.trim()) {
+              const history: StatusHistory = {
+                id: generateId(),
+                requirementId: r.id,
+                fromStatus: r.status,
+                toStatus: r.status,
+                reason: updates.reviewComment,
+                changedAt: now,
+                operatorId: s.currentUser?.id || '',
+                batchOperationId: batchOpId,
+              };
+              newHistories.push(history);
+              reqUpdates.statusHistory = [...r.statusHistory, history];
             }
             return { ...r, ...reqUpdates };
           }),
           reviews: [...newReviews, ...s.reviews],
-          statusHistory: [...s.statusHistory, ...newHistories],
+          statusHistory: [...newHistories, ...s.statusHistory],
+          batchOperations: [batchOp, ...s.batchOperations],
         }));
       },
 
@@ -324,13 +363,26 @@ export const useAppStore = create<AppState>()(
         const { requirements, filters, stores } = get();
         const visible = requirements.filter((r) => !r.isHidden);
         return visible.filter((req) => {
-          if (filters.status?.length && !filters.status.includes(req.status)) return false;
-          if (filters.module?.length && !filters.module.includes(req.module)) return false;
-          if (filters.priority?.length && !filters.priority.includes(req.priority)) return false;
-          if (filters.assigneeId?.length && !filters.assigneeId.includes(req.assigneeId || '')) return false;
-          if (filters.region?.length) {
+          if (filters.status) {
+            const statusArr = Array.isArray(filters.status) ? filters.status : [filters.status];
+            if (!statusArr.includes(req.status)) return false;
+          }
+          if (filters.module) {
+            const moduleArr = Array.isArray(filters.module) ? filters.module : [filters.module];
+            if (!moduleArr.includes(req.module)) return false;
+          }
+          if (filters.priority) {
+            const priorityArr = Array.isArray(filters.priority) ? filters.priority : [filters.priority];
+            if (!priorityArr.includes(req.priority)) return false;
+          }
+          if (filters.assigneeId) {
+            const assigneeArr = Array.isArray(filters.assigneeId) ? filters.assigneeId : [filters.assigneeId];
+            if (!assigneeArr.includes(req.assigneeId || '')) return false;
+          }
+          if (filters.region) {
+            const regionArr = Array.isArray(filters.region) ? filters.region : [filters.region];
             const store = stores.find((s) => s.id === req.storeId);
-            if (!store || !filters.region.includes(store.region)) return false;
+            if (!store || !regionArr.includes(store.region)) return false;
           }
           if (filters.search) {
             const search = filters.search.toLowerCase();
@@ -346,12 +398,239 @@ export const useAppStore = create<AppState>()(
             const end = new Date(filters.dateRange[1]).getTime();
             if (reqDate < start || reqDate > end) return false;
           }
+          if (filters.period && filters.period !== 'all') {
+            const days = filters.period === '7d' ? 7 : filters.period === '30d' ? 30 : 90;
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - days);
+            const reqDate = new Date(req.createdAt).getTime();
+            if (reqDate < cutoff.getTime()) return false;
+          }
           return true;
         });
       },
 
       getVisibleRequirements: () => {
         return get().requirements.filter((r) => !r.isHidden);
+      },
+
+      calculateWorkload: (requirements) => {
+        return requirements.reduce((sum, r) => {
+          const priorityWeight: Record<Priority, number> = {
+            critical: 5, high: 3, medium: 2, low: 1,
+          };
+          return sum + priorityWeight[r.priority];
+        }, 0);
+      },
+
+      calculateRiskLevel: (p0Count, p1Count, workload, capacity) => {
+        const utilization = capacity > 0 ? workload / capacity : 1;
+        if (utilization > 1 || p0Count >= 3) return 'high';
+        if (utilization > 0.8 || p0Count >= 1 || p1Count >= 3) return 'medium';
+        return 'low';
+      },
+
+      groupRequirements: (requirementIds, groupBy) => {
+        const state = get();
+        const reqs = state.requirements.filter(r => requirementIds.includes(r.id));
+        const groups: Map<string, ReviewGroup> = new Map();
+
+        if (groupBy === 'module') {
+          const MODULE_LABELS: Record<string, string> = {
+            pos: 'POS收银', inventory: '库存管理', member: '会员营销',
+            report: '数据报表', other: '其他模块',
+          };
+          reqs.forEach(r => {
+            const key = r.module;
+            if (!groups.has(key)) {
+              groups.set(key, {
+                id: generateId(),
+                name: MODULE_LABELS[key] || key,
+                type: 'module',
+                requirementIds: [],
+              });
+            }
+            groups.get(key)!.requirementIds.push(r.id);
+          });
+        } else if (groupBy === 'region') {
+          reqs.forEach(r => {
+            const store = state.stores.find(s => s.id === r.storeId);
+            const key = store?.region || '未分配区域';
+            if (!groups.has(key)) {
+              groups.set(key, {
+                id: generateId(),
+                name: key,
+                type: 'region',
+                requirementIds: [],
+              });
+            }
+            groups.get(key)!.requirementIds.push(r.id);
+          });
+        } else if (groupBy === 'titleSimilarity') {
+          const keywords = ['会员', '库存', '收银', '报表', '优惠券', '积分', '权限', '系统', '优化', '修复'];
+          reqs.forEach(r => {
+            let matched = false;
+            for (const kw of keywords) {
+              if (r.title.includes(kw)) {
+                if (!groups.has(kw)) {
+                  groups.set(kw, {
+                    id: generateId(),
+                    name: `「${kw}」相关需求`,
+                    type: 'titleSimilarity',
+                    requirementIds: [],
+                  });
+                }
+                groups.get(kw)!.requirementIds.push(r.id);
+                matched = true;
+                break;
+              }
+            }
+            if (!matched) {
+              if (!groups.has('other')) {
+                groups.set('other', {
+                  id: generateId(),
+                  name: '其他需求',
+                  type: 'titleSimilarity',
+                  requirementIds: [],
+                });
+              }
+              groups.get('other')!.requirementIds.push(r.id);
+            }
+          });
+        }
+
+        return Array.from(groups.values()).sort((a, b) => b.requirementIds.length - a.requirementIds.length);
+      },
+
+      batchReviewGrouped: (groups, allRequirementIds) => {
+        const state = get();
+        const now = new Date().toISOString();
+        const batchOpId = generateId();
+        const newReviews: Review[] = [];
+        const newHistories: StatusHistory[] = [];
+        const updatedReqs: Requirement[] = [...state.requirements];
+
+        groups.forEach(group => {
+          const hasChange = group.assigneeId || group.priority || group.status || group.reviewComment?.trim();
+          if (!hasChange) return;
+
+          group.requirementIds.forEach(reqId => {
+            const idx = updatedReqs.findIndex(r => r.id === reqId);
+            if (idx === -1) return;
+            const r = updatedReqs[idx];
+            const reqUpdates: Partial<Requirement> = { updatedAt: now, batchOperationId: batchOpId };
+            if (group.assigneeId) reqUpdates.assigneeId = group.assigneeId;
+            if (group.priority) reqUpdates.priority = group.priority;
+
+            if (group.status && group.status !== r.status) {
+              const history: StatusHistory = {
+                id: generateId(),
+                requirementId: r.id,
+                fromStatus: r.status,
+                toStatus: group.status,
+                reason: group.reviewComment,
+                changedAt: now,
+                operatorId: state.currentUser?.id || '',
+                batchOperationId: batchOpId,
+              };
+              newHistories.push(history);
+              reqUpdates.status = group.status;
+              reqUpdates.statusHistory = [...r.statusHistory, history];
+              reqUpdates.reviewTime = now;
+
+              if (group.status === 'approved' || group.status === 'rejected' || group.status === 'deferred') {
+                const conclusion: ReviewConclusion = group.status === 'approved' ? 'approved' : group.status === 'rejected' ? 'rejected' : 'deferred';
+                newReviews.push({
+                  id: generateId(),
+                  requirementId: r.id,
+                  conclusion,
+                  comment: group.reviewComment || `[${group.name}] 批量评审处理`,
+                  reviewedAt: now,
+                  reviewerId: state.currentUser?.id || '',
+                  batchOperationId: batchOpId,
+                });
+              }
+            } else if (group.reviewComment?.trim()) {
+              const history: StatusHistory = {
+                id: generateId(),
+                requirementId: r.id,
+                fromStatus: r.status,
+                toStatus: r.status,
+                reason: group.reviewComment,
+                changedAt: now,
+                operatorId: state.currentUser?.id || '',
+                batchOperationId: batchOpId,
+              };
+              newHistories.push(history);
+              reqUpdates.statusHistory = [...r.statusHistory, history];
+            }
+
+            updatedReqs[idx] = { ...r, ...reqUpdates };
+          });
+        });
+
+        const batchOp: BatchOperation = {
+          id: batchOpId,
+          type: 'batchReview',
+          operatorId: state.currentUser?.id || '',
+          createdAt: now,
+          totalCount: allRequirementIds.length,
+          groupCount: groups.length,
+          requirementIds: allRequirementIds,
+          summary: `分${groups.length}组批量评审${allRequirementIds.length}项需求`,
+        };
+
+        set({
+          requirements: updatedReqs,
+          reviews: [...newReviews, ...state.reviews],
+          statusHistory: [...newHistories, ...state.statusHistory],
+          batchOperations: [batchOp, ...state.batchOperations],
+        });
+      },
+
+      calculateCapacityPreview: (versionId, requirementIdsToAdd) => {
+        const state = get();
+        const version = state.versions.find(v => v.id === versionId);
+        const currentReqs = state.requirements.filter(r => r.versionId === versionId && !r.isHidden);
+        const addedReqs = state.requirements.filter(r => requirementIdsToAdd.includes(r.id));
+
+        const currentWorkload = state.calculateWorkload(currentReqs);
+        const addedWorkload = state.calculateWorkload(addedReqs);
+        const newWorkload = currentWorkload + addedWorkload;
+        const capacity = version?.capacity || 10;
+        const utilizationPercent = capacity > 0 ? Math.round((newWorkload / capacity) * 100) : 0;
+
+        const currentP0 = currentReqs.filter(r => r.priority === 'critical').length;
+        const currentP1 = currentReqs.filter(r => r.priority === 'high').length;
+        const addedP0 = addedReqs.filter(r => r.priority === 'critical').length;
+        const addedP1 = addedReqs.filter(r => r.priority === 'high').length;
+
+        const currentRisk = state.calculateRiskLevel(currentP0, currentP1, currentWorkload, capacity);
+        const newRisk = state.calculateRiskLevel(currentP0 + addedP0, currentP1 + addedP1, newWorkload, capacity);
+
+        const estimatedDelayDays = utilizationPercent > 100 ? Math.ceil((newWorkload - capacity) * 1.5) : 0;
+
+        return {
+          versionId,
+          currentWorkload,
+          addedWorkload,
+          newWorkload,
+          capacity,
+          utilizationPercent,
+          isOverloaded: utilizationPercent > 100,
+          isNearCapacity: utilizationPercent >= 80 && utilizationPercent <= 100,
+          p0Count: currentP0,
+          p1Count: currentP1,
+          newP0Count: currentP0 + addedP0,
+          newP1Count: currentP1 + addedP1,
+          riskLevel: currentRisk,
+          newRiskLevel: newRisk,
+          estimatedDelayDays,
+          addedRequirements: requirementIdsToAdd,
+        };
+      },
+
+      getBatchOperationById: (id) => {
+        return get().batchOperations.find(op => op.id === id);
       },
     }),
     {

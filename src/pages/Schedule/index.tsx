@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Plus, Calendar, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Plus, Calendar, CheckCircle2, AlertTriangle, ClipboardList } from 'lucide-react';
 import {
   DndContext,
   closestCorners,
@@ -16,6 +16,7 @@ import { useAppStore } from '@/store';
 import { VersionColumn } from './VersionColumn';
 import { VersionModal } from './VersionModal';
 import { AnnouncementModal } from './AnnouncementModal';
+import { CapacitySandboxModal } from './CapacitySandboxModal';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -33,9 +34,13 @@ export default function Schedule() {
   
   const [showVersionModal, setShowVersionModal] = useState(false);
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
+  const [showSandbox, setShowSandbox] = useState(false);
   const [editVersion, setEditVersion] = useState<Version | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | undefined>();
+  const [sandboxVersionId, setSandboxVersionId] = useState<string>('');
+  const [sandboxReqIds, setSandboxReqIds] = useState<string[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [pendingDrag, setPendingDrag] = useState<{ reqId: string; targetVersionId: string | undefined } | null>(null);
   
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -65,37 +70,6 @@ export default function Schedule() {
   };
   
   const handleDragOver = (event: DragOverEvent) => {
-    const { active, over } = event;
-    if (!over) return;
-    
-    const activeId = active.id as string;
-    const overId = over.id as string;
-    
-    const activeRequirement = requirements.find(r => r.id === activeId);
-    if (!activeRequirement) return;
-    
-    const overVersion = getVersionById(overId);
-    const overRequirement = requirements.find(r => r.id === overId);
-    
-    let targetVersionId: string | undefined;
-    
-    if (overId === 'unscheduled') {
-      targetVersionId = undefined;
-    } else if (overVersion) {
-      targetVersionId = overId;
-    } else if (overRequirement) {
-      targetVersionId = overRequirement.versionId;
-    }
-    
-    if (activeRequirement.versionId !== targetVersionId) {
-      updateRequirement(activeId, { versionId: targetVersionId });
-      
-      if (targetVersionId) {
-        updateRequirementStatus(activeId, 'scheduled' as RequirementStatus, '已排入版本');
-      } else {
-        updateRequirementStatus(activeId, 'approved' as RequirementStatus, '已移出版本');
-      }
-    }
   };
   
   const handleDragEnd = (event: DragEndEvent) => {
@@ -112,7 +86,28 @@ export default function Schedule() {
     const activeVersion = getVersionById(activeId);
     const overVersion = getVersionById(overId);
     
-    if (activeVersion || overVersion || overId === 'unscheduled') return;
+    if (activeVersion || overVersion || overId === 'unscheduled') {
+      if (overVersion || overId === 'unscheduled') {
+        const activeRequirement = requirements.find(r => r.id === activeId);
+        if (!activeRequirement) return;
+        
+        const targetVersionId = overId === 'unscheduled' ? undefined : overId;
+        
+        if (targetVersionId && activeRequirement.versionId !== targetVersionId) {
+          setSandboxVersionId(targetVersionId);
+          setSandboxReqIds([activeId]);
+          setPendingDrag({ reqId: activeId, targetVersionId });
+          setShowSandbox(true);
+          return;
+        }
+        
+        if (!targetVersionId && activeRequirement.versionId) {
+          updateRequirement(activeId, { versionId: undefined });
+          updateRequirementStatus(activeId, 'approved' as RequirementStatus, '已移出版本');
+        }
+      }
+      return;
+    }
     
     const activeReq = requirements.find(r => r.id === activeId);
     const overReq = requirements.find(r => r.id === overId);
@@ -126,6 +121,28 @@ export default function Schedule() {
         arrayMove(versionReqs, oldIndex, newIndex);
       }
     }
+  };
+
+  const handleSandboxConfirm = () => {
+    if (!pendingDrag) return;
+    const { reqId, targetVersionId } = pendingDrag;
+    
+    if (targetVersionId) {
+      updateRequirement(reqId, { versionId: targetVersionId });
+      updateRequirementStatus(reqId, 'scheduled' as RequirementStatus, '已排入版本');
+    }
+    
+    setShowSandbox(false);
+    setPendingDrag(null);
+    setSandboxReqIds([]);
+    setSandboxVersionId('');
+  };
+
+  const handleSandboxCancel = () => {
+    setShowSandbox(false);
+    setPendingDrag(null);
+    setSandboxReqIds([]);
+    setSandboxVersionId('');
   };
   
   const handleCreateVersion = () => {
@@ -299,6 +316,17 @@ export default function Schedule() {
                           请点击"调整排期"填写延期原因
                         </p>
                       )}
+                      {version.mitigationPlan && (
+                        <div className="mt-2 p-2 bg-blue-50 rounded-md border border-blue-200/60">
+                          <p className="text-xs text-blue-700 leading-relaxed flex items-start gap-1">
+                            <ClipboardList className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                            <span>
+                              <strong className="font-medium">处理计划：</strong>
+                              {version.mitigationPlan.length > 60 ? version.mitigationPlan.slice(0, 60) + '...' : version.mitigationPlan}
+                            </span>
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </CardBody>
@@ -345,6 +373,14 @@ export default function Schedule() {
         onClose={() => setShowAnnouncementModal(false)}
         versions={versions}
         selectedVersionId={selectedVersionId}
+      />
+      
+      <CapacitySandboxModal
+        isOpen={showSandbox}
+        onClose={handleSandboxCancel}
+        versionId={sandboxVersionId}
+        requirementIdsToAdd={sandboxReqIds}
+        onConfirm={handleSandboxConfirm}
       />
     </div>
   );
