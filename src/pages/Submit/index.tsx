@@ -96,17 +96,22 @@ export default function Submit() {
   
   const validate = (forSubmit = true): boolean => {
     const newErrors: FormErrors = {};
-    
+
+    if (!forSubmit) {
+      setErrors({});
+      return true;
+    }
+
     if (!formData.title.trim()) {
       newErrors.title = '请输入需求标题';
     } else if (forSubmit && formData.title.length < 5) {
       newErrors.title = '标题至少5个字符';
     }
-    
+
     if (!formData.module) {
       newErrors.module = '请选择所属模块';
     }
-    
+
     if (forSubmit) {
       if (!formData.description.trim()) {
         newErrors.description = '请输入需求描述';
@@ -114,11 +119,11 @@ export default function Submit() {
         newErrors.description = '描述至少20个字符，请详细说明需求';
       }
     }
-    
+
     if (!formData.impactScope) {
       newErrors.impactScope = '请选择影响范围';
     }
-    
+
     if (forSubmit) {
       if (!formData.expectedDate) {
         newErrors.expectedDate = '请选择期望上线时间';
@@ -126,7 +131,7 @@ export default function Submit() {
         newErrors.expectedDate = '期望上线时间不能早于今天';
       }
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -178,29 +183,27 @@ export default function Submit() {
   };
   
   const handleSaveDraft = async () => {
-    if (!validate(false)) return;
-    
     setIsSavingDraft(true);
-    
+
     await new Promise(resolve => setTimeout(resolve, 300));
-    
+
     const draftData = {
       ...formData,
       storeId: currentUser?.storeId || 's001',
       submitterId: currentUser?.id || 'u001',
     };
-    
+
     const newDraftId = saveDraft(draftData, currentDraftId);
     setCurrentDraftId(newDraftId);
-    
+
     setIsSavingDraft(false);
     setShowDraftSuccess(true);
-    
+
     if (!searchParams.get('draftId')) {
       searchParams.set('draftId', newDraftId);
       setSearchParams(searchParams, { replace: true });
     }
-    
+
     setTimeout(() => setShowDraftSuccess(false), 2000);
   };
   
@@ -271,11 +274,10 @@ export default function Submit() {
                 
                 <Input
                   label="需求标题"
-                  placeholder="请简要描述您的需求"
+                  placeholder="请简要描述您的需求（保存草稿可暂不填写）"
                   value={formData.title}
                   onChange={(e) => handleChange('title', e.target.value)}
                   error={errors.title}
-                  required
                 />
                 
                 <div className="grid grid-cols-2 gap-4">

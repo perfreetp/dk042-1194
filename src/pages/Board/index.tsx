@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Plus, GitMerge } from 'lucide-react';
+import { Plus, GitMerge, ClipboardCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { StatsCards } from './StatsCards';
 import { FilterBar } from './FilterBar';
 import { RequirementTable } from './RequirementTable';
 import { MergeModal } from './MergeModal';
+import { BatchReviewModal } from './BatchReviewModal';
 import { Button } from '@/components/ui/Button';
 import { useAppStore } from '@/store';
 
@@ -15,6 +16,7 @@ export default function Board() {
   
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
   const [showMerge, setShowMerge] = useState(false);
+  const [showBatchReview, setShowBatchReview] = useState(false);
   
   const handleRowSelect = (id: string, checked: boolean) => {
     setSelectedRowIds(prev =>
@@ -35,6 +37,7 @@ export default function Board() {
   );
   
   const canMerge = filteredSelectedIds.length >= 2;
+  const canBatchReview = filteredSelectedIds.length >= 1;
   
   return (
     <div>
@@ -44,6 +47,12 @@ export default function Board() {
           <p className="text-sm text-gray-500 mt-1">管理所有门店提交的需求，支持多维度筛选和搜索</p>
         </div>
         <div className="flex items-center gap-3">
+          {canBatchReview && (
+            <Button variant="outline" onClick={() => setShowBatchReview(true)}>
+              <ClipboardCheck className="w-4 h-4" />
+              批量评审{filteredSelectedIds.length > 1 ? ` (${filteredSelectedIds.length})` : ''}
+            </Button>
+          )}
           {canMerge && (
             <Button variant="secondary" onClick={() => setShowMerge(true)}>
               <GitMerge className="w-4 h-4" />
@@ -73,6 +82,16 @@ export default function Board() {
         onSuccess={() => {
           setSelectedRowIds([]);
           setShowMerge(false);
+        }}
+      />
+
+      <BatchReviewModal
+        isOpen={showBatchReview}
+        onClose={() => setShowBatchReview(false)}
+        selectedIds={filteredSelectedIds}
+        onSuccess={() => {
+          setSelectedRowIds([]);
+          setShowBatchReview(false);
         }}
       />
     </div>

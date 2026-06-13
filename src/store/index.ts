@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Requirement, Review, Version, Announcement, FilterOptions, StatusHistory, User, Store as StoreType } from '@/types';
+import type { Requirement, Review, Version, Announcement, FilterOptions, StatusHistory, User, Store as StoreType, ReviewConclusion } from '@/types';
 import { mockRequirements, mockReviews, mockVersions, mockAnnouncements, mockUsers, mockStores } from '@/mock';
 import { generateId } from '@/utils/format';
 
@@ -19,13 +19,14 @@ interface AppState {
   updateRequirementStatus: (id: string, status: Requirement['status'], reason?: string) => void;
   deleteRequirement: (id: string) => void;
   mergeRequirements: (primaryId: string, mergedIds: string[]) => void;
+  batchReview: (requirementIds: string[], updates: { assigneeId?: string; priority?: Requirement['priority']; reviewComment?: string; status?: Requirement['status'] }) => void;
   setFilters: (filters: Partial<FilterOptions>) => void;
   resetFilters: () => void;
   addReview: (review: Omit<Review, 'id' | 'reviewedAt'>) => void;
   addVersion: (version: Omit<Version, 'id'>) => void;
   updateVersion: (id: string, updates: Partial<Version>) => void;
   addAnnouncement: (announcement: Omit<Announcement, 'id' | 'publishedAt'>) => void;
-  saveDraft: (req: Partial<Requirement> & { storeId: string; submitterId: string; title: string }, existingId?: string) => string;
+  saveDraft: (req: Partial<Requirement> & { storeId?: string; submitterId?: string; title?: string }, existingId?: string) => string;
   getRequirementsByStatus: (status: Requirement['status']) => Requirement[];
   getRequirementsByVersion: (versionId: string | undefined) => Requirement[];
   getStoreById: (id: string) => StoreType | undefined;
@@ -63,11 +64,16 @@ export const useAppStore = create<AppState>()(
 
       saveDraft: (draftData, existingId) => {
         const now = new Date().toISOString();
+        const state = get();
+        const defaultStoreId = draftData.storeId || state.currentUser?.storeId || state.stores[0]?.id || 'store-default';
+        const defaultSubmitterId = draftData.submitterId || state.currentUser?.id || 'user-default';
+        const defaultTitle = draftData.title && draftData.title.trim() ? draftData.title : `未命名草稿 ${new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`;
+
         if (existingId) {
           set((state) => ({
             requirements: state.requirements.map((r) =>
               r.id === existingId
-                ? { ...r, ...draftData, status: 'draft', updatedAt: now }
+                ? { ...r, ...draftData, storeId: defaultStoreId, submitterId: defaultSubmitterId, title: defaultTitle, status: 'draft', updatedAt: now }
                 : r
             ),
           }));
@@ -82,6 +88,9 @@ export const useAppStore = create<AppState>()(
           priority: 'medium',
           businessValue: 'medium',
           ...draftData,
+          storeId: defaultStoreId,
+          submitterId: defaultSubmitterId,
+          title: defaultTitle,
           id: generateId(),
           status: 'draft',
           statusHistory: [],
@@ -133,6 +142,57 @@ export const useAppStore = create<AppState>()(
             }
             return r;
           }),
+        }));
+      },
+
+      batchReview: (requirementIds, updates) => {
+        const state = get();
+        const now = new Date().toISOString();
+        const validIds = requirementIds.filter(id =>
+          state.requirements.some(r => r.id === id)
+        );
+        if (validIds.length === 0) return;
+
+        const newReviews: Review[] = [];
+        const newHistories: StatusHistory[] = [];
+
+        set((s) => ({
+          requirements: s.requirements.map((r) => {
+            if (!validIds.includes(r.id)) return r;
+            const reqUpdates: Partial<Requirement> = { updatedAt: now };
+            if (updates.assigneeId) reqUpdates.assigneeId = updates.assigneeId;
+            if (updates.priority) reqUpdates.priority = updates.priority;
+            if (updates.status && updates.status !== r.status) {
+              const history: StatusHistory = {
+                id: generateId(),
+                requirementId: r.id,
+                fromStatus: r.status,
+                toStatus: updates.status,
+                reason: updates.reviewComment,
+                changedAt: now,
+                operatorId: s.currentUser?.id || '',
+              };
+              newHistories.push(history);
+              reqUpdates.status = updates.status;
+              reqUpdates.statusHistory = [...r.statusHistory, history];
+              reqUpdates.reviewTime = now;
+
+              if (updates.status === 'approved' || updates.status === 'rejected' || updates.status === 'deferred') {
+                const conclusion: ReviewConclusion = updates.status === 'approved' ? 'approved' : updates.status === 'rejected' ? 'rejected' : 'deferred';
+                newReviews.push({
+                  id: generateId(),
+                  requirementId: r.id,
+                  conclusion,
+                  comment: updates.reviewComment || '批量评审处理',
+                  reviewedAt: now,
+                  reviewerId: s.currentUser?.id || '',
+                });
+              }
+            }
+            return { ...r, ...reqUpdates };
+          }),
+          reviews: [...newReviews, ...s.reviews],
+          statusHistory: [...s.statusHistory, ...newHistories],
         }));
       },
 

@@ -8,14 +8,21 @@ export const mockVersions: Version[] = [
     startDate: '2026-05-01',
     releaseDate: '2026-06-10',
     description: '主要优化收银模块性能和会员集成功能',
+    capacity: 8,
+    riskLevel: 'low',
   },
   {
     id: 'v002',
     name: 'V2.2.0 库存管理版',
     status: 'testing',
     startDate: '2026-06-01',
-    releaseDate: '2026-07-15',
+    releaseDate: '2026-06-14',
     description: '库存预警、智能补货、批次管理',
+    delayReason: '第三方仓储接口对接延期两周，需要等待供应商完成接口联调',
+    originalReleaseDate: '2026-06-01',
+    capacity: 10,
+    riskLevel: 'high',
+    mitigationPlan: '1. 安排专人跟供应商对接，每周同步进度；2. 核心功能优先开发，非核心功能延后到下个版本；3. 预留一周缓冲时间',
   },
   {
     id: 'v003',
@@ -24,6 +31,8 @@ export const mockVersions: Version[] = [
     startDate: '2026-06-15',
     releaseDate: '2026-08-01',
     description: '会员等级、积分商城、营销活动',
+    capacity: 6,
+    riskLevel: 'medium',
   },
   {
     id: 'v004',
@@ -32,6 +41,8 @@ export const mockVersions: Version[] = [
     startDate: '2026-07-15',
     releaseDate: '2026-09-01',
     description: '多维度报表、实时看板、智能分析',
+    capacity: 8,
+    riskLevel: 'medium',
   },
 ];
 

@@ -3,21 +3,50 @@ import ReactECharts from 'echarts-for-react';
 import { useAppStore } from '@/store';
 import { MODULE_LABELS, MODULE_COLORS } from '@/utils/constants';
 
-interface ModuleChartProps {
-  height?: number;
+interface ChartFilters {
+  region: string;
+  module: string;
+  period: string;
 }
 
-export function ModuleChart({ height = 350 }: ModuleChartProps) {
+interface ModuleChartProps {
+  height?: number;
+  filters?: ChartFilters;
+  onChartClick?: (params: any) => void;
+}
+
+export function ModuleChart({ height = 350, filters, onChartClick }: ModuleChartProps) {
   const requirements = useAppStore((state) => state.requirements);
-  
+  const stores = useAppStore((state) => state.stores);
+
+  const filteredRequirements = useMemo(() => {
+    let result = requirements.filter(r => !r.isHidden);
+    if (filters?.period && filters.period !== 'all') {
+      const days = filters.period === '7d' ? 7 : filters.period === '30d' ? 30 : 90;
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      result = result.filter(r => new Date(r.createdAt) >= cutoff);
+    }
+    if (filters?.region && filters.region !== 'all') {
+      const regionStores = stores.filter(s => s.region === filters.region).map(s => s.id);
+      result = result.filter(r => regionStores.includes(r.storeId));
+    }
+    return result;
+  }, [requirements, stores, filters]);
+
   const option = useMemo(() => {
     const modules = Object.entries(MODULE_LABELS);
-    
-    const data = modules.map(([key, label]) => ({
-      value: requirements.filter(r => r.module === key).length,
+
+    let filteredModules = modules;
+    if (filters?.module && filters.module !== 'all') {
+      filteredModules = modules.filter(([k]) => k === filters.module);
+    }
+
+    const data = filteredModules.map(([key, label]) => ({
+      value: filteredRequirements.filter(r => r.module === key).length,
       name: label,
     })).filter(d => d.value > 0);
-    
+
     return {
       tooltip: {
         trigger: 'item',
@@ -56,22 +85,33 @@ export function ModuleChart({ height = 350 }: ModuleChartProps) {
               fontWeight: 'bold',
               formatter: '{b}\n{c}个',
             },
+            itemStyle: {
+              shadowBlur: 10,
+              shadowOffsetX: 0,
+              shadowColor: 'rgba(0, 0, 0, 0.2)',
+            },
           },
           labelLine: {
             show: false,
           },
-          data: data,
-          color: modules.map(([key]) => MODULE_COLORS[key as keyof typeof MODULE_COLORS]),
+          data: data.length > 0 ? data : [{ value: 1, name: '暂无数据' }],
+          color: data.length > 0 ? filteredModules.map(([key]) => MODULE_COLORS[key as keyof typeof MODULE_COLORS]) : ['#e5e7eb'],
         },
       ],
     };
-  }, [requirements]);
-  
+  }, [filteredRequirements, filters]);
+
+  const onEvents = onChartClick ? {
+    click: onChartClick,
+  } : undefined;
+
   return (
     <ReactECharts
       option={option}
-      style={{ height }}
+      style={{ height, cursor: onChartClick ? 'pointer' : 'default' }}
       opts={{ renderer: 'canvas' }}
+      onEvents={onEvents}
     />
   );
 }
+

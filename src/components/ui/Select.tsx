@@ -1,4 +1,4 @@
-import { forwardRef, type SelectHTMLAttributes, useId } from 'react';
+import { forwardRef, type SelectHTMLAttributes, useId, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -10,7 +10,7 @@ interface SelectOption {
 interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'children'> {
   options: SelectOption[];
   error?: string;
-  label?: string;
+  label?: ReactNode;
   placeholder?: string;
 }
 

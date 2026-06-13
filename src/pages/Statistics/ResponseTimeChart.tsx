@@ -3,8 +3,15 @@ import ReactECharts from 'echarts-for-react';
 import { useAppStore } from '@/store';
 import type { Requirement } from '@/types';
 
+interface ChartFilters {
+  region: string;
+  module: string;
+  period: string;
+}
+
 interface ResponseTimeChartProps {
   height?: number;
+  filters?: ChartFilters;
 }
 
 function calculateResponseTime(req: Requirement): number {
@@ -14,12 +21,30 @@ function calculateResponseTime(req: Requirement): number {
   return Math.round((end - start) / (1000 * 60 * 60 * 24));
 }
 
-export function ResponseTimeChart({ height = 350 }: ResponseTimeChartProps) {
+export function ResponseTimeChart({ height = 350, filters }: ResponseTimeChartProps) {
   const requirements = useAppStore((state) => state.requirements);
   const stores = useAppStore((state) => state.stores);
+
+  const filteredRequirements = useMemo(() => {
+    let result = requirements.filter(r => !r.isHidden && r.reviewTime);
+    if (filters?.period && filters.period !== 'all') {
+      const days = filters.period === '7d' ? 7 : filters.period === '30d' ? 30 : 90;
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      result = result.filter(r => new Date(r.createdAt) >= cutoff);
+    }
+    if (filters?.region && filters.region !== 'all') {
+      const regionStores = stores.filter(s => s.region === filters.region).map(s => s.id);
+      result = result.filter(r => regionStores.includes(r.storeId));
+    }
+    if (filters?.module && filters.module !== 'all') {
+      result = result.filter(r => r.module === filters.module);
+    }
+    return result;
+  }, [requirements, stores, filters]);
   
   const option = useMemo(() => {
-    const reviewedReqs = requirements.filter(r => r.reviewTime);
+    const reviewedReqs = filteredRequirements;
     
     const timeRanges = [
       { min: 0, max: 1, label: '1天内' },
@@ -30,7 +55,11 @@ export function ResponseTimeChart({ height = 350 }: ResponseTimeChartProps) {
       { min: 30, max: Infinity, label: '30天以上' },
     ];
     
-    const avgTimeByRegion = Array.from(new Set(stores.map(s => s.region))).map(region => {
+    const filteredRegions = filters?.region && filters.region !== 'all'
+      ? [filters.region]
+      : Array.from(new Set(stores.map(s => s.region)));
+    
+    const avgTimeByRegion = filteredRegions.map(region => {
       const regionStores = stores.filter(s => s.region === region).map(s => s.id);
       const regionReqs = reviewedReqs.filter(r => regionStores.includes(r.storeId));
       
@@ -180,7 +209,7 @@ export function ResponseTimeChart({ height = 350 }: ResponseTimeChartProps) {
         },
       ],
     };
-  }, [requirements, stores]);
+  }, [filteredRequirements, stores, filters]);
   
   return (
     <ReactECharts

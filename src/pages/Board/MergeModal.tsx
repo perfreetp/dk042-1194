@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { ChevronDown, ChevronUp, GitMerge, AlertCircle } from 'lucide-react';
 import { useAppStore } from '@/store';
 import type { Requirement } from '@/types';
@@ -26,6 +26,14 @@ export function MergeModal({ isOpen, onClose, selectedIds, onSuccess }: MergeMod
   const [primaryId, setPrimaryId] = useState<string>('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState<string>('');
+
+  useEffect(() => {
+    if (isOpen) {
+      setPrimaryId('');
+      setExpandedId(null);
+      setError('');
+    }
+  }, [isOpen, selectedIds]);
   
   const selectedRequirements = useMemo(() => {
     return requirements.filter((r) => selectedIds.includes(r.id));

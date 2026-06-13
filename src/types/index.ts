@@ -90,6 +90,9 @@ export interface Version {
   description: string;
   delayReason?: string;
   originalReleaseDate?: string;
+  capacity?: number;
+  riskLevel?: 'low' | 'medium' | 'high';
+  mitigationPlan?: string;
 }
 
 export interface Announcement {

@@ -1,9 +1,9 @@
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { Settings, MoreVertical, Megaphone, AlertTriangle, CalendarX } from 'lucide-react';
+import { Settings, MoreVertical, Megaphone, AlertTriangle, CalendarX, Gauge, ShieldAlert, ClipboardList } from 'lucide-react';
 import type { Requirement, Version } from '@/types';
 import { DraggableCard } from './DraggableCard';
-import { VERSION_STATUS_LABELS, VERSION_STATUS_COLORS } from '@/utils/constants';
+import { VERSION_STATUS_LABELS, VERSION_STATUS_COLORS, PRIORITY_LABELS } from '@/utils/constants';
 import { Tag } from '@/components/ui/Tag';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
@@ -17,19 +17,43 @@ interface VersionColumnProps {
   isUnscheduled?: boolean;
 }
 
+const RISK_LABELS: Record<string, string> = {
+  low: '低风险',
+  medium: '中风险',
+  high: '高风险',
+};
+const RISK_COLORS: Record<string, string> = {
+  low: 'bg-emerald-100 text-emerald-700',
+  medium: 'bg-amber-100 text-amber-700',
+  high: 'bg-rose-100 text-rose-700',
+};
+
 export function VersionColumn({ version, requirements, onEdit, onAnnounce, isUnscheduled }: VersionColumnProps) {
   const [showMenu, setShowMenu] = useState(false);
-  
+
   const { setNodeRef, isOver } = useDroppable({
     id: version ? version.id : 'unscheduled',
   });
-  
+
   const requirementIds = requirements.map(r => r.id);
-  
+
   const isDelayed = version && version.status !== 'released' && version.releaseDate
     ? new Date(version.releaseDate) < new Date()
     : false;
-  
+
+  const workload = requirements.reduce((sum, r) => {
+    const priorityWeight = r.priority === 'critical' ? 5 : r.priority === 'high' ? 3 : r.priority === 'medium' ? 2 : 1;
+    return sum + priorityWeight;
+  }, 0);
+
+  const capacity = version?.capacity || 0;
+  const usageRatio = capacity > 0 ? workload / capacity : 0;
+  const isOverloaded = capacity > 0 && workload > capacity;
+  const isNearCapacity = capacity > 0 && !isOverloaded && usageRatio >= 0.8;
+
+  const criticalCount = requirements.filter(r => r.priority === 'critical').length;
+  const highCount = requirements.filter(r => r.priority === 'high').length;
+
   const headerClass = isUnscheduled
     ? 'bg-gray-50 border-b border-gray-200'
     : isDelayed
@@ -41,7 +65,9 @@ export function VersionColumn({ version, requirements, onEdit, onAnnounce, isUns
     : version?.status === 'developing'
     ? 'bg-blue-50 border-b border-blue-200'
     : 'bg-indigo-50 border-b border-indigo-200';
-  
+
+  const affectedReqsPreview = requirements.slice(0, 3);
+
   return (
     <div className="w-72 flex-shrink-0">
       <div className={`flex items-start gap-2 p-3 rounded-t-lg ${headerClass}`}>
@@ -65,11 +91,27 @@ export function VersionColumn({ version, requirements, onEdit, onAnnounce, isUns
                     <AlertTriangle className="w-4 h-4 text-rose-500" />
                   </span>
                 )}
+                {version.riskLevel && (
+                  <span className="flex-shrink-0" title={`风险等级：${RISK_LABELS[version.riskLevel]}`}>
+                    <ShieldAlert className={`w-4 h-4 ${version.riskLevel === 'high' ? 'text-rose-500' : version.riskLevel === 'medium' ? 'text-amber-500' : 'text-emerald-500'}`} />
+                  </span>
+                )}
+                {isOverloaded && (
+                  <span className="flex-shrink-0" title="容量超载">
+                    <AlertTriangle className="w-4 h-4 text-rose-500 animate-pulse" />
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <Tag colorClass={VERSION_STATUS_COLORS[version.status]}>
                   {VERSION_STATUS_LABELS[version.status]}
                 </Tag>
+                {version.riskLevel && (
+                  <Tag colorClass={RISK_COLORS[version.riskLevel]}>
+                    <ShieldAlert className="w-3 h-3 mr-0.5" />
+                    {RISK_LABELS[version.riskLevel]}
+                  </Tag>
+                )}
                 <div className="flex items-center gap-1 text-xs text-gray-500">
                   {version.originalReleaseDate && isDelayed ? (
                     <>
@@ -83,6 +125,70 @@ export function VersionColumn({ version, requirements, onEdit, onAnnounce, isUns
                   </span>
                 </div>
               </div>
+
+              {capacity > 0 && (
+                <div className="mt-2">
+                  <div className="flex items-center justify-between text-[11px] mb-1">
+                    <span className="flex items-center gap-1 text-gray-500">
+                      <Gauge className="w-3 h-3" />
+                      容量 {workload}/{capacity}
+                      {criticalCount > 0 && <span className="text-rose-600">·P0×{criticalCount}</span>}
+                      {highCount > 0 && <span className="text-orange-600">·P1×{highCount}</span>}
+                    </span>
+                    <span className={`font-medium ${isOverloaded ? 'text-rose-600' : isNearCapacity ? 'text-amber-600' : 'text-emerald-600'}`}>
+                      {Math.round(usageRatio * 100)}%
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-white/70 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        isOverloaded ? 'bg-rose-500' : isNearCapacity ? 'bg-amber-500' : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${Math.min(usageRatio * 100, 100)}%` }}
+                    />
+                  </div>
+                  {isOverloaded && (
+                    <p className="text-[11px] text-rose-600 mt-1 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" />
+                      超载 {workload - capacity} 点，建议移出
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {isDelayed && version.mitigationPlan && (
+                <div className="mt-2 p-2 bg-blue-100/60 rounded-md border border-blue-200/60">
+                  <p className="text-[11px] text-blue-800 leading-relaxed flex items-start gap-1">
+                    <ClipboardList className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                    <span>
+                      <strong className="font-medium">处理计划：</strong>
+                      {truncateText(version.mitigationPlan, 50)}
+                    </span>
+                  </p>
+                </div>
+              )}
+
+              {isDelayed && requirements.length > 0 && !version.mitigationPlan && (
+                <div className="mt-2 p-2 bg-white/70 rounded-md border border-gray-200/60">
+                  <p className="text-[11px] text-gray-600 mb-1 flex items-center gap-1">
+                    <ShieldAlert className="w-3 h-3" />
+                    受影响需求 ({requirements.length})：
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {affectedReqsPreview.map(r => (
+                      <span key={r.id} className="inline-block px-1.5 py-0.5 bg-gray-100 rounded text-[10px] text-gray-700 max-w-[120px] truncate">
+                        {PRIORITY_LABELS[r.priority]} {r.title}
+                      </span>
+                    ))}
+                    {requirements.length > 3 && (
+                      <span className="inline-block px-1.5 py-0.5 bg-gray-100 rounded text-[10px] text-gray-500">
+                        +{requirements.length - 3} 更多
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {version.delayReason && (
                 <div className="mt-2 p-2 bg-rose-100/50 rounded-md border border-rose-200/60">
                   <p className="text-[11px] text-rose-700 leading-relaxed" title={version.delayReason}>
@@ -141,7 +247,7 @@ export function VersionColumn({ version, requirements, onEdit, onAnnounce, isUns
           </>
         )}
       </div>
-      
+
       <div
         ref={setNodeRef}
         className={`bg-gray-100 rounded-b-lg p-3 min-h-[500px] space-y-3 transition-colors ${
@@ -164,3 +270,4 @@ export function VersionColumn({ version, requirements, onEdit, onAnnounce, isUns
     </div>
   );
 }
+
