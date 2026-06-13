@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Upload, X, FileText, AlertCircle } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Upload, X, FileText, AlertCircle, Save, Send, CheckCircle2 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -12,6 +12,7 @@ import { PriorityBadge } from '@/components/common/PriorityBadge';
 import { MODULE_LABELS, PRIORITY_LABELS, IMPACT_SCOPE_LABELS, BUSINESS_VALUE_LABELS } from '@/utils/constants';
 import type { ModuleType, Priority, ImpactScope, BusinessValue } from '@/types';
 import { formatDate } from '@/utils/format';
+import { Tag } from '@/components/ui/Tag';
 
 interface FormData {
   title: string;
@@ -34,15 +35,22 @@ interface FormErrors {
 
 export default function Submit() {
   const navigate = useNavigate();
-  const { id } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const draftId = searchParams.get('draftId');
+  const editId = searchParams.get('id');
+  const targetId = draftId || editId;
+  
   const addRequirement = useAppStore((state) => state.addRequirement);
   const updateRequirement = useAppStore((state) => state.updateRequirement);
+  const updateRequirementStatus = useAppStore((state) => state.updateRequirementStatus);
+  const saveDraft = useAppStore((state) => state.saveDraft);
   const requirements = useAppStore((state) => state.requirements);
   const currentUser = useAppStore((state) => state.currentUser);
   const getStoreById = useAppStore((state) => state.getStoreById);
   
-  const isEdit = !!id;
-  const existingReq = id ? requirements.find(r => r.id === id) : null;
+  const existingReq = targetId ? requirements.find(r => r.id === targetId) : null;
+  const isEdit = !!existingReq;
+  const isDraftMode = !!draftId || existingReq?.status === 'draft';
   
   const [formData, setFormData] = useState<FormData>({
     title: '',
@@ -57,6 +65,9 @@ export default function Submit() {
   
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [showDraftSuccess, setShowDraftSuccess] = useState(false);
+  const [currentDraftId, setCurrentDraftId] = useState<string | undefined>(draftId || undefined);
   
   useEffect(() => {
     if (existingReq) {
@@ -70,8 +81,11 @@ export default function Submit() {
         businessValue: existingReq.businessValue,
         screenshots: existingReq.screenshots,
       });
+      if (draftId) {
+        setCurrentDraftId(draftId);
+      }
     }
-  }, [existingReq]);
+  }, [existingReq, draftId]);
   
   const moduleOptions = Object.entries(MODULE_LABELS).map(([value, label]) => ({ value, label }));
   const priorityOptions = Object.entries(PRIORITY_LABELS).map(([value, label]) => ({ value, label }));
@@ -80,12 +94,12 @@ export default function Submit() {
   
   const userStore = currentUser?.storeId ? getStoreById(currentUser.storeId) : null;
   
-  const validate = (): boolean => {
+  const validate = (forSubmit = true): boolean => {
     const newErrors: FormErrors = {};
     
     if (!formData.title.trim()) {
       newErrors.title = '请输入需求标题';
-    } else if (formData.title.length < 5) {
+    } else if (forSubmit && formData.title.length < 5) {
       newErrors.title = '标题至少5个字符';
     }
     
@@ -93,20 +107,24 @@ export default function Submit() {
       newErrors.module = '请选择所属模块';
     }
     
-    if (!formData.description.trim()) {
-      newErrors.description = '请输入需求描述';
-    } else if (formData.description.length < 20) {
-      newErrors.description = '描述至少20个字符，请详细说明需求';
+    if (forSubmit) {
+      if (!formData.description.trim()) {
+        newErrors.description = '请输入需求描述';
+      } else if (formData.description.length < 20) {
+        newErrors.description = '描述至少20个字符，请详细说明需求';
+      }
     }
     
     if (!formData.impactScope) {
       newErrors.impactScope = '请选择影响范围';
     }
     
-    if (!formData.expectedDate) {
-      newErrors.expectedDate = '请选择期望上线时间';
-    } else if (new Date(formData.expectedDate) < new Date()) {
-      newErrors.expectedDate = '期望上线时间不能早于今天';
+    if (forSubmit) {
+      if (!formData.expectedDate) {
+        newErrors.expectedDate = '请选择期望上线时间';
+      } else if (new Date(formData.expectedDate) < new Date(new Date().toDateString())) {
+        newErrors.expectedDate = '期望上线时间不能早于今天';
+      }
     }
     
     setErrors(newErrors);
@@ -116,14 +134,26 @@ export default function Submit() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!validate()) return;
+    if (!validate(true)) return;
     
     setIsSubmitting(true);
     
     await new Promise(resolve => setTimeout(resolve, 500));
     
-    if (isEdit && id) {
-      updateRequirement(id, {
+    if (isDraftMode && currentDraftId) {
+      updateRequirement(currentDraftId, {
+        title: formData.title,
+        module: formData.module,
+        description: formData.description,
+        impactScope: formData.impactScope,
+        expectedDate: formData.expectedDate,
+        priority: formData.priority,
+        businessValue: formData.businessValue,
+        screenshots: formData.screenshots,
+      });
+      updateRequirementStatus(currentDraftId, 'pending', '草稿已提交，转为正式需求');
+    } else if (editId && existingReq && existingReq.status !== 'draft') {
+      updateRequirement(editId, {
         title: formData.title,
         module: formData.module,
         description: formData.description,
@@ -140,11 +170,38 @@ export default function Submit() {
         submitterId: currentUser?.id || 'u001',
         priority: formData.priority,
         businessValue: formData.businessValue,
-      });
+      }, false);
     }
     
     setIsSubmitting(false);
-    navigate('/');
+    navigate('/board');
+  };
+  
+  const handleSaveDraft = async () => {
+    if (!validate(false)) return;
+    
+    setIsSavingDraft(true);
+    
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    const draftData = {
+      ...formData,
+      storeId: currentUser?.storeId || 's001',
+      submitterId: currentUser?.id || 'u001',
+    };
+    
+    const newDraftId = saveDraft(draftData, currentDraftId);
+    setCurrentDraftId(newDraftId);
+    
+    setIsSavingDraft(false);
+    setShowDraftSuccess(true);
+    
+    if (!searchParams.get('draftId')) {
+      searchParams.set('draftId', newDraftId);
+      setSearchParams(searchParams, { replace: true });
+    }
+    
+    setTimeout(() => setShowDraftSuccess(false), 2000);
   };
   
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -178,13 +235,28 @@ export default function Submit() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            {isEdit ? '编辑需求' : '提交新需求'}
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-900">
+              {isDraftMode ? (currentDraftId && existingReq ? '编辑草稿' : '提交新需求') : isEdit ? '编辑需求' : '提交新需求'}
+            </h1>
+            {isDraftMode && (
+              <Tag colorClass="bg-slate-100 text-slate-700">
+                <FileText className="w-3.5 h-3.5 mr-1" />
+                草稿模式
+              </Tag>
+            )}
+          </div>
           <p className="text-sm text-gray-500 mt-1">
             请详细描述您的需求，我们将尽快处理
+            {currentDraftId && <span className="ml-2 text-slate-500">（草稿ID: {currentDraftId.toUpperCase()}）</span>}
           </p>
         </div>
+        {showDraftSuccess && (
+          <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 animate-fadeIn">
+            <CheckCircle2 className="w-4 h-4" />
+            <span className="text-sm font-medium">草稿已保存</span>
+          </div>
+        )}
       </div>
       
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -222,7 +294,7 @@ export default function Submit() {
                     value={formData.expectedDate}
                     onChange={(e) => handleChange('expectedDate', e.target.value)}
                     error={errors.expectedDate}
-                    required
+                    required={!isDraftMode}
                   />
                 </div>
                 
@@ -242,6 +314,13 @@ export default function Submit() {
                     onChange={(e) => handleChange('priority', e.target.value)}
                     options={priorityOptions}
                   />
+                  
+                  <Select
+                    label="业务价值评估"
+                    value={formData.businessValue}
+                    onChange={(e) => handleChange('businessValue', e.target.value)}
+                    options={bizValueOptions}
+                  />
                 </div>
                 
                 <Textarea
@@ -251,7 +330,7 @@ export default function Submit() {
                   onChange={(e) => handleChange('description', e.target.value)}
                   error={errors.description}
                   rows={6}
-                  required
+                  required={!isDraftMode}
                 />
                 
                 <div>
@@ -351,6 +430,12 @@ export default function Submit() {
                       {BUSINESS_VALUE_LABELS[formData.businessValue]}
                     </span>
                   </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">影响范围</p>
+                    <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-gray-100 text-gray-700">
+                      {IMPACT_SCOPE_LABELS[formData.impactScope]}
+                    </span>
+                  </div>
                 </div>
               </CardBody>
             </Card>
@@ -364,6 +449,9 @@ export default function Submit() {
                     <p className="text-xs text-amber-600 mt-1">
                       需求提交后将进入待处理状态，产品经理会在3个工作日内进行评估和分配。
                     </p>
+                    <p className="text-xs text-amber-600 mt-1">
+                      未完成的内容可以先保存草稿，随时回来继续编辑。
+                    </p>
                   </div>
                 </div>
               </CardBody>
@@ -373,28 +461,31 @@ export default function Submit() {
         
         <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between sticky bottom-6 z-10">
           <p className="text-sm text-gray-500">
-            <span className="text-rose-500">*</span> 为必填项
+            <span className="text-rose-500">*</span> 为必填项（保存草稿时可暂不填写）
           </p>
           <div className="flex items-center gap-3">
             <Button
               type="button"
               variant="outline"
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/board')}
             >
               取消
             </Button>
             <Button
               type="button"
               variant="ghost"
-              onClick={() => {}}
+              onClick={handleSaveDraft}
+              disabled={isSavingDraft}
             >
-              保存草稿
+              <Save className="w-4 h-4" />
+              {isSavingDraft ? '保存中...' : '保存草稿'}
             </Button>
             <Button
               type="submit"
               disabled={isSubmitting}
             >
-              {isSubmitting ? '提交中...' : isEdit ? '保存修改' : '提交需求'}
+              <Send className="w-4 h-4" />
+              {isSubmitting ? '提交中...' : isEdit && !isDraftMode ? '保存修改' : isDraftMode && existingReq ? '提交草稿' : '提交需求'}
             </Button>
           </div>
         </div>

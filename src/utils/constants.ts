@@ -1,6 +1,7 @@
 import type { RequirementStatus, ModuleType, Priority, BusinessValue, ImpactScope, ReviewConclusion, VersionStatus } from '@/types';
 
 export const STATUS_LABELS: Record<RequirementStatus, string> = {
+  draft: '草稿',
   pending: '待处理',
   reviewing: '评审中',
   approved: '已通过',
@@ -13,6 +14,7 @@ export const STATUS_LABELS: Record<RequirementStatus, string> = {
 };
 
 export const STATUS_COLORS: Record<RequirementStatus, string> = {
+  draft: 'bg-slate-100 text-slate-700 border-slate-200',
   pending: 'bg-gray-100 text-gray-700 border-gray-200',
   reviewing: 'bg-blue-50 text-blue-700 border-blue-200',
   approved: 'bg-emerald-50 text-emerald-700 border-emerald-200',

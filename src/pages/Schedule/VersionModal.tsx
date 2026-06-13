@@ -1,34 +1,61 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppStore } from '@/store';
+import type { Version, VersionStatus } from '@/types';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Textarea } from '@/components/ui/Textarea';
 import { Select } from '@/components/ui/Select';
+import { Textarea } from '@/components/ui/Textarea';
 import { VERSION_STATUS_LABELS } from '@/utils/constants';
-import type { VersionStatus } from '@/types';
-import { formatDate } from '@/utils/format';
+import { AlertTriangle } from 'lucide-react';
 
 interface VersionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  editVersion?: { id: string; name: string; status: VersionStatus; startDate: string; releaseDate: string; description: string } | null;
+  editVersion?: Version | null;
 }
-
-const statusOptions = Object.entries(VERSION_STATUS_LABELS).map(([value, label]) => ({ value, label }));
 
 export function VersionModal({ isOpen, onClose, editVersion }: VersionModalProps) {
   const addVersion = useAppStore((state) => state.addVersion);
   const updateVersion = useAppStore((state) => state.updateVersion);
   
-  const isEdit = !!editVersion;
-  
-  const [name, setName] = useState(editVersion?.name || '');
-  const [status, setStatus] = useState<VersionStatus>(editVersion?.status || 'planning');
-  const [startDate, setStartDate] = useState(editVersion?.startDate || formatDate(new Date()));
-  const [releaseDate, setReleaseDate] = useState(editVersion?.releaseDate || '');
-  const [description, setDescription] = useState(editVersion?.description || '');
+  const [name, setName] = useState('');
+  const [status, setStatus] = useState<VersionStatus>('planning');
+  const [startDate, setStartDate] = useState('');
+  const [releaseDate, setReleaseDate] = useState('');
+  const [description, setDescription] = useState('');
+  const [delayReason, setDelayReason] = useState('');
+  const [originalReleaseDate, setOriginalReleaseDate] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  
+  const isDelayed = editVersion?.status !== 'released' && editVersion?.releaseDate
+    ? new Date(editVersion.releaseDate) < new Date()
+    : false;
+  
+  useEffect(() => {
+    if (isOpen) {
+      if (editVersion) {
+        setName(editVersion.name);
+        setStatus(editVersion.status);
+        setStartDate(editVersion.startDate);
+        setReleaseDate(editVersion.releaseDate);
+        setDescription(editVersion.description);
+        setDelayReason(editVersion.delayReason || '');
+        setOriginalReleaseDate(editVersion.originalReleaseDate || '');
+      } else {
+        setName('');
+        setStatus('planning');
+        setStartDate('');
+        setReleaseDate('');
+        setDescription('');
+        setDelayReason('');
+        setOriginalReleaseDate('');
+      }
+      setErrors({});
+    }
+  }, [isOpen, editVersion]);
+  
+  const statusOptions = Object.entries(VERSION_STATUS_LABELS).map(([value, label]) => ({ value, label }));
   
   const validate = () => {
     const newErrors: Record<string, string> = {};
@@ -45,10 +72,38 @@ export function VersionModal({ isOpen, onClose, editVersion }: VersionModalProps
   const handleSubmit = () => {
     if (!validate()) return;
     
-    if (isEdit && editVersion) {
-      updateVersion(editVersion.id, { name, status, startDate, releaseDate, description });
+    if (editVersion) {
+      const updates: Partial<Version> = {
+        name,
+        status,
+        startDate,
+        releaseDate,
+        description,
+      };
+      
+      if (editVersion.releaseDate !== releaseDate && new Date(releaseDate) > new Date(editVersion.releaseDate)) {
+        updates.originalReleaseDate = editVersion.originalReleaseDate || editVersion.releaseDate;
+        if (delayReason.trim()) {
+          updates.delayReason = delayReason.trim();
+        }
+      } else if (delayReason.trim()) {
+        updates.delayReason = delayReason.trim();
+        if (!originalReleaseDate && editVersion.releaseDate !== releaseDate) {
+          updates.originalReleaseDate = editVersion.releaseDate;
+        }
+      }
+      
+      updateVersion(editVersion.id, updates);
     } else {
-      addVersion({ name, status, startDate, releaseDate, description });
+      addVersion({
+        name,
+        status,
+        startDate,
+        releaseDate,
+        description,
+        ...(delayReason.trim() ? { delayReason: delayReason.trim() } : {}),
+        ...(originalReleaseDate ? { originalReleaseDate } : {}),
+      });
     }
     
     handleClose();
@@ -57,31 +112,32 @@ export function VersionModal({ isOpen, onClose, editVersion }: VersionModalProps
   const handleClose = () => {
     setName('');
     setStatus('planning');
-    setStartDate(formatDate(new Date()));
+    setStartDate('');
     setReleaseDate('');
     setDescription('');
+    setDelayReason('');
+    setOriginalReleaseDate('');
     setErrors({});
     onClose();
   };
-  
-
   
   return (
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title={isEdit ? '编辑版本' : '创建版本'}
+      title={editVersion ? '编辑版本' : '新建版本'}
+      size="lg"
       footer={
         <div className="flex justify-end gap-3">
           <Button variant="outline" onClick={handleClose}>取消</Button>
-          <Button onClick={handleSubmit}>{isEdit ? '保存修改' : '创建版本'}</Button>
+          <Button onClick={handleSubmit}>{editVersion ? '保存修改' : '创建版本'}</Button>
         </div>
       }
     >
       <div className="space-y-4">
         <Input
           label="版本名称"
-          placeholder="例如：V2.5.0 功能优化版"
+          placeholder="例如：V2.5.0 优化增强版"
           value={name}
           onChange={(e) => setName(e.target.value)}
           error={errors.name}
@@ -89,15 +145,6 @@ export function VersionModal({ isOpen, onClose, editVersion }: VersionModalProps
         />
         
         <div className="grid grid-cols-2 gap-4">
-          <Select
-            label="版本状态"
-            value={status}
-            onChange={(e) => setStatus(e.target.value as VersionStatus)}
-            options={statusOptions}
-          />
-          
-          <div />
-          
           <Input
             type="date"
             label="开始日期"
@@ -117,13 +164,49 @@ export function VersionModal({ isOpen, onClose, editVersion }: VersionModalProps
           />
         </div>
         
+        <Select
+          label="版本状态"
+          value={status}
+          onChange={(e) => setStatus(e.target.value as VersionStatus)}
+          options={statusOptions}
+        />
+        
         <Textarea
           label="版本描述"
-          placeholder="描述本版本包含的主要功能..."
+          placeholder="简要描述本版本包含的主要功能和目标..."
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={3}
         />
+        
+        {(isDelayed || delayReason || (editVersion && editVersion.releaseDate !== releaseDate)) && (
+          <div className="space-y-3">
+            {isDelayed && (
+              <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
+                <p className="text-sm text-rose-700 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>该版本的计划发布日期已过，建议填写延期原因。</span>
+                </p>
+              </div>
+            )}
+            
+            {originalReleaseDate && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-xs text-amber-700">
+                  原计划发布日期：<strong>{originalReleaseDate}</strong>
+                </p>
+              </div>
+            )}
+            
+            <Textarea
+              label="延期原因"
+              placeholder="如延期请说明原因：例如需求范围扩大、开发遇到技术难点、依赖项延迟等..."
+              value={delayReason}
+              onChange={(e) => setDelayReason(e.target.value)}
+              rows={3}
+            />
+          </div>
+        )}
       </div>
     </Modal>
   );

@@ -247,6 +247,67 @@ export default function Schedule() {
         </div>
       )}
       
+      {delayedVersions.length > 0 && (
+        <div className="mb-6 space-y-3">
+          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-500" />
+            延期版本提醒 ({delayedVersions.length})
+          </h3>
+          {delayedVersions.map((version) => {
+            const reqCount = getRequirementsByVersion(version.id).length;
+            const delayDays = Math.ceil((new Date().getTime() - new Date(version.releaseDate).getTime()) / (1000 * 60 * 60 * 24));
+            return (
+              <Card key={version.id} className="bg-rose-50 border-rose-200">
+                <CardBody>
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center flex-shrink-0">
+                      <AlertTriangle className="w-5 h-5 text-rose-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <h4 className="font-medium text-rose-900">{version.name}</h4>
+                        <span className="text-xs text-rose-600 bg-rose-100 px-2 py-0.5 rounded">
+                          已延期 {delayDays} 天
+                        </span>
+                        <span className="text-xs text-rose-600 bg-rose-100/60 px-2 py-0.5 rounded">
+                          {reqCount} 个需求
+                        </span>
+                        {version.originalReleaseDate && (
+                          <span className="text-xs text-gray-500">
+                            原计划: {version.originalReleaseDate} → 现计划: {version.releaseDate}
+                          </span>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="ml-auto !border-rose-300 !text-rose-600 hover:!bg-rose-100 !py-1 !px-3 text-xs"
+                          onClick={() => handleEditVersion(version)}
+                        >
+                          调整排期
+                        </Button>
+                      </div>
+                      {version.delayReason ? (
+                        <div className="mt-2 p-2 bg-white/70 rounded-md border border-rose-200/60">
+                          <p className="text-xs text-rose-700 leading-relaxed">
+                            <strong className="font-medium">延期原因：</strong>
+                            {version.delayReason}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-rose-600 mt-2 flex items-center gap-1">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          请点击"调整排期"填写延期原因
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </CardBody>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+      
       <DndContext
         sensors={sensors}
         collisionDetection={closestCorners}

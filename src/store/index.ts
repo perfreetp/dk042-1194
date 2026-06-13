@@ -14,16 +14,18 @@ interface AppState {
   statusHistory: StatusHistory[];
   currentUser: User | null;
   filters: FilterOptions;
-  addRequirement: (req: Omit<Requirement, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'statusHistory'>) => void;
+  addRequirement: (req: Omit<Requirement, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'statusHistory'>, asDraft?: boolean) => void;
   updateRequirement: (id: string, updates: Partial<Requirement>) => void;
   updateRequirementStatus: (id: string, status: Requirement['status'], reason?: string) => void;
   deleteRequirement: (id: string) => void;
+  mergeRequirements: (primaryId: string, mergedIds: string[]) => void;
   setFilters: (filters: Partial<FilterOptions>) => void;
   resetFilters: () => void;
   addReview: (review: Omit<Review, 'id' | 'reviewedAt'>) => void;
   addVersion: (version: Omit<Version, 'id'>) => void;
   updateVersion: (id: string, updates: Partial<Version>) => void;
   addAnnouncement: (announcement: Omit<Announcement, 'id' | 'publishedAt'>) => void;
+  saveDraft: (req: Partial<Requirement> & { storeId: string; submitterId: string; title: string }, existingId?: string) => string;
   getRequirementsByStatus: (status: Requirement['status']) => Requirement[];
   getRequirementsByVersion: (versionId: string | undefined) => Requirement[];
   getStoreById: (id: string) => StoreType | undefined;
@@ -31,6 +33,7 @@ interface AppState {
   getVersionById: (id: string) => Version | undefined;
   getReviewsByRequirementId: (requirementId: string) => Review[];
   getFilteredRequirements: () => Requirement[];
+  getVisibleRequirements: () => Requirement[];
 }
 
 export const useAppStore = create<AppState>()(
@@ -46,16 +49,91 @@ export const useAppStore = create<AppState>()(
       currentUser: mockUsers[0],
       filters: {},
 
-      addRequirement: (req) => {
+      addRequirement: (req, asDraft = false) => {
         const newReq: Requirement = {
           ...req,
           id: generateId(),
-          status: 'pending',
+          status: asDraft ? 'draft' : 'pending',
           statusHistory: [],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
         set((state) => ({ requirements: [newReq, ...state.requirements] }));
+      },
+
+      saveDraft: (draftData, existingId) => {
+        const now = new Date().toISOString();
+        if (existingId) {
+          set((state) => ({
+            requirements: state.requirements.map((r) =>
+              r.id === existingId
+                ? { ...r, ...draftData, status: 'draft', updatedAt: now }
+                : r
+            ),
+          }));
+          return existingId;
+        }
+        const newDraft: Requirement = {
+          module: 'other',
+          description: '',
+          screenshots: [],
+          impactScope: 'single',
+          expectedDate: '',
+          priority: 'medium',
+          businessValue: 'medium',
+          ...draftData,
+          id: generateId(),
+          status: 'draft',
+          statusHistory: [],
+          createdAt: now,
+          updatedAt: now,
+        };
+        set((state) => ({ requirements: [newDraft, ...state.requirements] }));
+        return newDraft.id;
+      },
+
+      mergeRequirements: (primaryId, mergedIds) => {
+        const state = get();
+        const primaryReq = state.requirements.find((r) => r.id === primaryId);
+        if (!primaryReq) return;
+
+        const mergedReqs = state.requirements.filter((r) => mergedIds.includes(r.id));
+        const mergedFromIds = [...(primaryReq.mergedFromIds || []), ...mergedIds];
+        const mergedDescriptions = mergedReqs.map((r) => `【合并自：${r.title}】\n${r.description}`).join('\n\n');
+        const mergedScreenshots = [...new Set([...primaryReq.screenshots, ...mergedReqs.flatMap(r => r.screenshots)])];
+        const mergedHistory = mergedReqs.flatMap((r) => [
+          {
+            id: generateId(),
+            requirementId: primaryId,
+            fromStatus: r.status,
+            toStatus: primaryReq.status,
+            reason: `需求被合并：${r.title}`,
+            changedAt: new Date().toISOString(),
+            operatorId: state.currentUser?.id || '',
+          },
+          ...r.statusHistory,
+        ]);
+
+        const newDescription = primaryReq.description + (mergedDescriptions ? `\n\n${mergedDescriptions}` : '');
+
+        set((s) => ({
+          requirements: s.requirements.map((r) => {
+            if (r.id === primaryId) {
+              return {
+                ...r,
+                mergedFromIds,
+                description: newDescription,
+                screenshots: mergedScreenshots,
+                statusHistory: [...r.statusHistory, ...mergedHistory],
+                updatedAt: new Date().toISOString(),
+              };
+            }
+            if (mergedIds.includes(r.id)) {
+              return { ...r, isHidden: true, updatedAt: new Date().toISOString() };
+            }
+            return r;
+          }),
+        }));
       },
 
       updateRequirement: (id, updates) => {
@@ -147,7 +225,15 @@ export const useAppStore = create<AppState>()(
           id: generateId(),
           publishedAt: new Date().toISOString(),
         };
-        set((state) => ({ announcements: [newAnnouncement, ...state.announcements] }));
+        set((state) => {
+          const updatedVersions = state.versions.map((v) =>
+            v.id === announcement.versionId ? { ...v, status: 'released' as const } : v
+          );
+          return {
+            announcements: [newAnnouncement, ...state.announcements],
+            versions: updatedVersions,
+          };
+        });
       },
 
       getRequirementsByStatus: (status) => {
@@ -176,7 +262,8 @@ export const useAppStore = create<AppState>()(
 
       getFilteredRequirements: () => {
         const { requirements, filters, stores } = get();
-        return requirements.filter((req) => {
+        const visible = requirements.filter((r) => !r.isHidden);
+        return visible.filter((req) => {
           if (filters.status?.length && !filters.status.includes(req.status)) return false;
           if (filters.module?.length && !filters.module.includes(req.module)) return false;
           if (filters.priority?.length && !filters.priority.includes(req.priority)) return false;
@@ -201,6 +288,10 @@ export const useAppStore = create<AppState>()(
           }
           return true;
         });
+      },
+
+      getVisibleRequirements: () => {
+        return get().requirements.filter((r) => !r.isHidden);
       },
     }),
     {

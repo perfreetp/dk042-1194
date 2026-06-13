@@ -1,4 +1,5 @@
 export type RequirementStatus =
+  | 'draft'
   | 'pending'
   | 'reviewing'
   | 'approved'
@@ -53,6 +54,8 @@ export interface Requirement {
   versionId?: string;
   reviewTime?: string;
   statusHistory: StatusHistory[];
+  mergedFromIds?: string[];
+  isHidden?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -85,6 +88,8 @@ export interface Version {
   startDate: string;
   releaseDate: string;
   description: string;
+  delayReason?: string;
+  originalReleaseDate?: string;
 }
 
 export interface Announcement {
