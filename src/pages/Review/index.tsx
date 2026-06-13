@@ -3,6 +3,7 @@ import { Clock, CheckCircle2, XCircle, Users } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { ReviewColumn } from './ReviewColumn';
 import { ReviewModal } from './ReviewModal';
+import { RequirementDetail } from '@/pages/Board/RequirementDetail';
 import type { Requirement } from '@/types';
 
 const columns = [
@@ -33,6 +34,8 @@ export default function Review() {
   const requirements = useAppStore((state) => state.requirements);
   const [selectedReq, setSelectedReq] = useState<Requirement | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
+  const [detailReqId, setDetailReqId] = useState<string>('');
   
   const getRequirementsByStatuses = (statuses: readonly Requirement['status'][]) => {
     return requirements.filter(r => statuses.includes(r.status));
@@ -41,6 +44,11 @@ export default function Review() {
   const handleReview = (req: Requirement) => {
     setSelectedReq(req);
     setShowModal(true);
+  };
+  
+  const handleViewDetail = (reqId: string) => {
+    setDetailReqId(reqId);
+    setShowDetail(true);
   };
   
   const totalCount = requirements.length;
@@ -96,6 +104,7 @@ export default function Review() {
             color={col.color}
             requirements={getRequirementsByStatuses(col.status)}
             onReview={handleReview}
+            onViewDetail={handleViewDetail}
           />
         ))}
       </div>
@@ -104,6 +113,12 @@ export default function Review() {
         isOpen={showModal}
         onClose={() => setShowModal(false)}
         requirement={selectedReq}
+      />
+      
+      <RequirementDetail
+        isOpen={showDetail}
+        onClose={() => setShowDetail(false)}
+        requirementId={detailReqId}
       />
     </div>
   );

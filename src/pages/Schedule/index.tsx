@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Plus, Calendar, CheckCircle2, AlertTriangle, ClipboardList } from 'lucide-react';
+import { Plus, Calendar, CheckCircle2, AlertTriangle, ClipboardList, Layers, Gauge, ShieldAlert, X } from 'lucide-react';
 import {
   DndContext,
   closestCorners,
@@ -20,7 +20,7 @@ import { CapacitySandboxModal } from './CapacitySandboxModal';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import type { Version, RequirementStatus } from '@/types';
+import type { Version, RequirementStatus, Requirement } from '@/types';
 import { formatDate } from '@/utils/format';
 import { VERSION_STATUS_LABELS } from '@/utils/constants';
 
@@ -30,7 +30,11 @@ export default function Schedule() {
   const announcements = useAppStore((state) => state.announcements);
   const updateRequirement = useAppStore((state) => state.updateRequirement);
   const updateRequirementStatus = useAppStore((state) => state.updateRequirementStatus);
+  const updateVersion = useAppStore((state) => state.updateVersion);
   const getVersionById = useAppStore((state) => state.getVersionById);
+  const calculateCapacityPreview = useAppStore((state) => state.calculateCapacityPreview);
+  const calculateRiskLevel = useAppStore((state) => state.calculateRiskLevel);
+  const calculateWorkload = useAppStore((state) => state.calculateWorkload);
   
   const [showVersionModal, setShowVersionModal] = useState(false);
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
@@ -40,7 +44,9 @@ export default function Schedule() {
   const [sandboxVersionId, setSandboxVersionId] = useState<string>('');
   const [sandboxReqIds, setSandboxReqIds] = useState<string[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [pendingDrag, setPendingDrag] = useState<{ reqId: string; targetVersionId: string | undefined } | null>(null);
+  const [pendingDrag, setPendingDrag] = useState<{ reqIds: string[]; targetVersionId: string | undefined } | null>(null);
+  const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
+  const [lastSandboxPreview, setLastSandboxPreview] = useState<{ versionId: string; impact: string } | null>(null);
   
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -85,32 +91,41 @@ export default function Schedule() {
     
     const activeVersion = getVersionById(activeId);
     const overVersion = getVersionById(overId);
+    const activeReq = requirements.find(r => r.id === activeId);
+    const overReq = requirements.find(r => r.id === overId);
     
-    if (activeVersion || overVersion || overId === 'unscheduled') {
-      if (overVersion || overId === 'unscheduled') {
-        const activeRequirement = requirements.find(r => r.id === activeId);
-        if (!activeRequirement) return;
-        
-        const targetVersionId = overId === 'unscheduled' ? undefined : overId;
-        
-        if (targetVersionId && activeRequirement.versionId !== targetVersionId) {
-          setSandboxVersionId(targetVersionId);
-          setSandboxReqIds([activeId]);
-          setPendingDrag({ reqId: activeId, targetVersionId });
-          setShowSandbox(true);
-          return;
-        }
-        
-        if (!targetVersionId && activeRequirement.versionId) {
-          updateRequirement(activeId, { versionId: undefined });
-          updateRequirementStatus(activeId, 'approved' as RequirementStatus, '已移出版本');
-        }
+    let targetVersionId: string | undefined;
+    if (overVersion || overId === 'unscheduled') {
+      targetVersionId = overId === 'unscheduled' ? undefined : overId;
+    } else if (overReq) {
+      targetVersionId = overReq.versionId;
+    }
+    
+    if (targetVersionId === undefined && (overVersion || overId === 'unscheduled' || (overReq && !overReq.versionId))) {
+      if (activeReq && activeReq.versionId) {
+        updateRequirement(activeId, { versionId: undefined });
+        updateRequirementStatus(activeId, 'approved' as RequirementStatus, '已移出版本');
+        setSelectedCardIds(prev => prev.filter(id => id !== activeId));
       }
       return;
     }
     
-    const activeReq = requirements.find(r => r.id === activeId);
-    const overReq = requirements.find(r => r.id === overId);
+    if (targetVersionId) {
+      const reqIdsToMove = selectedCardIds.includes(activeId) && selectedCardIds.length > 1
+        ? selectedCardIds.filter(id => {
+            const r = requirements.find(req => req.id === id);
+            return r && r.versionId !== targetVersionId;
+          })
+        : (activeReq && activeReq.versionId !== targetVersionId ? [activeId] : []);
+      
+      if (reqIdsToMove.length > 0) {
+        setSandboxVersionId(targetVersionId);
+        setSandboxReqIds(reqIdsToMove);
+        setPendingDrag({ reqIds: reqIdsToMove, targetVersionId });
+        setShowSandbox(true);
+        return;
+      }
+    }
     
     if (activeReq && overReq && activeReq.versionId === overReq.versionId) {
       const versionReqs = getRequirementsByVersion(activeReq.versionId || '');
@@ -125,11 +140,54 @@ export default function Schedule() {
 
   const handleSandboxConfirm = () => {
     if (!pendingDrag) return;
-    const { reqId, targetVersionId } = pendingDrag;
+    const { reqIds, targetVersionId } = pendingDrag;
     
     if (targetVersionId) {
-      updateRequirement(reqId, { versionId: targetVersionId });
-      updateRequirementStatus(reqId, 'scheduled' as RequirementStatus, '已排入版本');
+      const preview = calculateCapacityPreview(targetVersionId, reqIds);
+      
+      reqIds.forEach(reqId => {
+        updateRequirement(reqId, { versionId: targetVersionId });
+        updateRequirementStatus(reqId, 'scheduled' as RequirementStatus, `已排入版本 ${getVersionById(targetVersionId)?.name || ''}`);
+      });
+      
+      const version = getVersionById(targetVersionId);
+      if (version) {
+        const currentReqs = requirements.filter(r => r.versionId === targetVersionId && !r.isHidden);
+        const newReqs = [...currentReqs, ...reqIds.map(id => requirements.find(r => r.id === id)).filter(Boolean) as Requirement[]];
+        const newWorkload = calculateWorkload(newReqs);
+        const newP0 = newReqs.filter(r => r.priority === 'critical').length;
+        const newP1 = newReqs.filter(r => r.priority === 'high').length;
+        const newRisk = calculateRiskLevel(newP0, newP1, newWorkload, version.capacity || 10);
+        
+        updateVersion(targetVersionId, {
+          riskLevel: newRisk,
+        });
+        
+        const capacityIncrease = preview.addedWorkload;
+        const riskChanged = preview.riskLevel !== preview.newRiskLevel;
+        const delayImpact = preview.estimatedDelayDays > 0 
+          ? `预计延期 ${preview.estimatedDelayDays} 天` 
+          : '无延期影响';
+        
+        const impactParts: string[] = [];
+        impactParts.push(`容量 +${capacityIncrease} 点 (${preview.currentWorkload} → ${preview.newWorkload})`);
+        if (riskChanged) {
+          const RISK_LABELS: Record<string, string> = { low: '低', medium: '中', high: '高' };
+          impactParts.push(`风险 ${RISK_LABELS[preview.riskLevel]} → ${RISK_LABELS[preview.newRiskLevel]}`);
+        }
+        if (preview.estimatedDelayDays > 0) {
+          impactParts.push(`预计延期 ${preview.estimatedDelayDays} 天`);
+        }
+        
+        setLastSandboxPreview({
+          versionId: targetVersionId,
+          impact: impactParts.join(' · '),
+        });
+        
+        setTimeout(() => setLastSandboxPreview(null), 8000);
+      }
+      
+      setSelectedCardIds([]);
     }
     
     setShowSandbox(false);
@@ -143,6 +201,17 @@ export default function Schedule() {
     setPendingDrag(null);
     setSandboxReqIds([]);
     setSandboxVersionId('');
+  };
+
+  const handleCardSelect = (reqId: string, e: React.MouseEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.stopPropagation();
+      setSelectedCardIds(prev => 
+        prev.includes(reqId) 
+          ? prev.filter(id => id !== reqId)
+          : [...prev, reqId]
+      );
+    }
   };
   
   const handleCreateVersion = () => {
@@ -175,7 +244,24 @@ export default function Schedule() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">版本排期</h1>
-          <p className="text-sm text-gray-500 mt-1">拖拽需求到对应版本进行排期管理</p>
+          <p className="text-sm text-gray-500 mt-1 flex items-center gap-3">
+            拖拽需求到对应版本进行排期管理
+            <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+              <kbd className="px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono">Ctrl</kbd>
+              + 点击多选，可批量拖入
+            </span>
+            {selectedCardIds.length > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#1e3a5f]/10 text-[#1e3a5f] rounded-full text-xs font-medium">
+                已选 {selectedCardIds.length} 条
+                <button
+                  onClick={() => setSelectedCardIds([])}
+                  className="ml-1 hover:text-[#1e3a5f]/80"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           {delayedVersions.length > 0 && (
@@ -327,6 +413,17 @@ export default function Schedule() {
                           </p>
                         </div>
                       )}
+                      {lastSandboxPreview && lastSandboxPreview.versionId === version.id && (
+                        <div className="mt-2 p-2 bg-indigo-50 rounded-md border border-indigo-200/60 animate-pulse">
+                          <p className="text-xs text-indigo-700 leading-relaxed flex items-start gap-1">
+                            <Layers className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                            <span>
+                              <strong className="font-medium">最新排期影响：</strong>
+                              {lastSandboxPreview.impact}
+                            </span>
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </CardBody>
@@ -348,6 +445,8 @@ export default function Schedule() {
             version={null}
             requirements={unscheduledRequirements}
             isUnscheduled
+            selectedCardIds={selectedCardIds}
+            onCardSelect={handleCardSelect}
           />
           
           {sortedVersions.map((version) => (
@@ -357,6 +456,8 @@ export default function Schedule() {
               requirements={getRequirementsByVersion(version.id)}
               onEdit={handleEditVersion}
               onAnnounce={handleAnnounce}
+              selectedCardIds={selectedCardIds}
+              onCardSelect={handleCardSelect}
             />
           ))}
         </div>

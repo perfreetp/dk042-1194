@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, MapPin, Calendar, MoreHorizontal } from 'lucide-react';
+import { GripVertical, MapPin, Calendar, MoreHorizontal, Check } from 'lucide-react';
 import type { Requirement, RequirementStatus } from '@/types';
 import { useAppStore } from '@/store';
 import { Card, CardBody } from '@/components/ui/Card';
@@ -17,9 +17,11 @@ const statusOptions = Object.entries(STATUS_LABELS).map(([value, label]) => ({ v
 interface DraggableCardProps {
   requirement: Requirement;
   onStatusChange?: (id: string, status: RequirementStatus) => void;
+  isSelected?: boolean;
+  onSelect?: (reqId: string, e: React.MouseEvent) => void;
 }
 
-export function DraggableCard({ requirement, onStatusChange }: DraggableCardProps) {
+export function DraggableCard({ requirement, onStatusChange, isSelected, onSelect }: DraggableCardProps) {
   const {
     attributes,
     listeners,
@@ -48,16 +50,28 @@ export function DraggableCard({ requirement, onStatusChange }: DraggableCardProp
     onStatusChange?.(requirement.id, newStatus);
     setShowStatusMenu(false);
   };
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (onSelect && (e.ctrlKey || e.metaKey)) {
+      onSelect(requirement.id, e);
+    }
+  };
   
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={`transition-opacity ${isDragging ? 'opacity-50' : ''}`}
+      onClick={handleClick}
     >
-      <Card hoverable className="group">
+      <Card hoverable className={`group ${isSelected ? 'ring-2 ring-[#1e3a5f] ring-offset-1' : ''}`}>
         <CardBody className="p-3">
           <div className="flex items-start gap-2 mb-2">
+            {isSelected && (
+              <div className="absolute top-2 right-2 w-5 h-5 bg-[#1e3a5f] text-white rounded-full flex items-center justify-center z-10">
+                <Check className="w-3 h-3" />
+              </div>
+            )}
             <div
               {...attributes}
               {...listeners}
@@ -66,7 +80,7 @@ export function DraggableCard({ requirement, onStatusChange }: DraggableCardProp
               <GripVertical className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors" />
             </div>
             <div className="flex-1 min-w-0">
-              <h4 className="text-sm font-medium text-gray-900 mb-2" title={requirement.title}>
+              <h4 className="text-sm font-medium text-gray-900 mb-2 pr-6" title={requirement.title}>
                 {truncateText(requirement.title, 25)}
               </h4>
               <div className="flex flex-wrap gap-1.5 mb-2">
@@ -94,7 +108,7 @@ export function DraggableCard({ requirement, onStatusChange }: DraggableCardProp
             </div>
             <div className="relative flex-shrink-0">
               <button
-                onClick={() => setShowStatusMenu(!showStatusMenu)}
+                onClick={(e) => { e.stopPropagation(); setShowStatusMenu(!showStatusMenu); }}
                 className="p-1 rounded hover:bg-gray-100 transition-colors"
               >
                 <MoreHorizontal className="w-4 h-4 text-gray-400" />
@@ -103,13 +117,13 @@ export function DraggableCard({ requirement, onStatusChange }: DraggableCardProp
                 <>
                   <div
                     className="fixed inset-0 z-10"
-                    onClick={() => setShowStatusMenu(false)}
+                    onClick={(e) => { e.stopPropagation(); setShowStatusMenu(false); }}
                   />
                   <div className="absolute right-0 top-full mt-1 w-36 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
                     {statusOptions.map((opt) => (
                       <button
                         key={opt.value}
-                        onClick={() => handleStatusChange(opt.value as RequirementStatus)}
+                        onClick={(e) => { e.stopPropagation(); handleStatusChange(opt.value as RequirementStatus); }}
                         className={`w-full px-3 py-1.5 text-left text-xs hover:bg-gray-50 transition-colors ${
                           requirement.status === opt.value ? 'bg-[#1e3a5f]/5 text-[#1e3a5f]' : 'text-gray-700'
                         }`}

@@ -13,6 +13,7 @@ import { BUSINESS_VALUE_LABELS, BUSINESS_VALUE_COLORS, PRIORITY_LABELS } from '@
 import { Tag } from '@/components/ui/Tag';
 import type { Priority, BusinessValue, Requirement } from '@/types';
 import { MergeModal } from './MergeModal';
+import { RequirementDetail } from './RequirementDetail';
 
 interface RequirementTableProps {
   selectedRowIds: string[];
@@ -288,91 +289,13 @@ export function RequirementTable({ selectedRowIds, onRowSelect, onSelectAll, onO
         )}
       </div>
       
-      <Modal
+      <RequirementDetail
         isOpen={showDetail}
         onClose={() => setShowDetail(false)}
-        title="需求详情"
-        size="lg"
-      >
-        {selectedRequirement && (
-          <div className="space-y-5">
-            <div>
-              <h4 className="text-lg font-semibold text-gray-900 mb-2">{selectedRequirement.title}</h4>
-              <div className="flex items-center gap-3 flex-wrap">
-                <StatusBadge status={selectedRequirement.status} />
-                <ModuleTag module={selectedRequirement.module} />
-                <PriorityBadge priority={selectedRequirement.priority} />
-                <Tag colorClass={BUSINESS_VALUE_COLORS[selectedRequirement.businessValue]}>
-                  {BUSINESS_VALUE_LABELS[selectedRequirement.businessValue]}
-                </Tag>
-                {selectedRequirement.mergedFromIds && selectedRequirement.mergedFromIds.length > 0 && (
-                  <Tag colorClass="bg-purple-100 text-purple-700">
-                    <GitMerge className="w-3.5 h-3.5 mr-1" />
-                    已合并 {selectedRequirement.mergedFromIds.length} 项
-                  </Tag>
-                )}
-              </div>
-            </div>
-            
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h5 className="text-sm font-medium text-gray-700 mb-2">需求描述</h5>
-              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{selectedRequirement.description}</p>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <h5 className="text-sm font-medium text-gray-700 mb-1">提交门店</h5>
-                <p className="text-sm text-gray-600">{getStoreById(selectedRequirement.storeId)?.name}</p>
-              </div>
-              <div>
-                <h5 className="text-sm font-medium text-gray-700 mb-1">所属区域</h5>
-                <p className="text-sm text-gray-600">{getStoreById(selectedRequirement.storeId)?.region}</p>
-              </div>
-              <div>
-                <h5 className="text-sm font-medium text-gray-700 mb-1">负责人</h5>
-                <p className="text-sm text-gray-600">
-                  {selectedRequirement.assigneeId ? getUserById(selectedRequirement.assigneeId)?.name : '未分配'}
-                </p>
-              </div>
-              <div>
-                <h5 className="text-sm font-medium text-gray-700 mb-1">期望上线时间</h5>
-                <p className="text-sm text-gray-600">{selectedRequirement.expectedDate}</p>
-              </div>
-              <div>
-                <h5 className="text-sm font-medium text-gray-700 mb-1">创建时间</h5>
-                <p className="text-sm text-gray-600">{formatDateTime(selectedRequirement.createdAt)}</p>
-              </div>
-              <div>
-                <h5 className="text-sm font-medium text-gray-700 mb-1">更新时间</h5>
-                <p className="text-sm text-gray-600">{formatDateTime(selectedRequirement.updatedAt)}</p>
-              </div>
-            </div>
-            
-            {mergedFromList.length > 0 && (
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                <h5 className="text-sm font-medium text-purple-900 mb-3 flex items-center gap-2">
-                  <GitMerge className="w-4 h-4" />
-                  合并来源 ({mergedFromList.length} 项)
-                </h5>
-                <div className="space-y-2">
-                  {mergedFromList.map((m) => (
-                    <div key={m.id} className="bg-white rounded-lg p-3 border border-purple-100">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-mono text-purple-600">{m.id.toUpperCase()}</span>
-                        <StatusBadge status={m.status} size="sm" />
-                      </div>
-                      <p className="text-sm font-medium text-gray-900">{m.title}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        {getStoreById(m.storeId)?.name} · {formatDateTime(m.createdAt)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
+        requirementId={selectedReq}
+        onEdit={handleOpenEdit}
+        onEditDraft={handleEditDraft}
+      />
       
       <Modal
         isOpen={showEdit}

@@ -159,3 +159,32 @@ export interface CapacityPreview {
   estimatedDelayDays: number;
   addedRequirements: string[];
 }
+
+export type TimelineEventType = 'create' | 'statusChange' | 'review' | 'batchReview' | 'merge' | 'schedule' | 'update';
+
+export interface TimelineEvent {
+  id: string;
+  type: TimelineEventType;
+  requirementId: string;
+  title: string;
+  description?: string;
+  operatorId?: string;
+  timestamp: string;
+  batchOperationId?: string;
+  fromStatus?: RequirementStatus;
+  toStatus?: RequirementStatus;
+  reviewConclusion?: ReviewConclusion;
+  versionId?: string;
+  versionName?: string;
+  mergedFromIds?: string[];
+  mergedToId?: string;
+}
+
+export interface SavedView {
+  id: string;
+  name: string;
+  description?: string;
+  filters: FilterOptions;
+  createdAt: string;
+  createdBy: string;
+}

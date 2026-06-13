@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Requirement, Review, Version, Announcement, FilterOptions, StatusHistory, User, Store as StoreType, ReviewConclusion, ReviewGroup, BatchOperation, CapacityPreview, GroupByType, Priority } from '@/types';
+import type { Requirement, Review, Version, Announcement, FilterOptions, StatusHistory, User, Store as StoreType, ReviewConclusion, ReviewGroup, BatchOperation, CapacityPreview, GroupByType, Priority, TimelineEvent, SavedView, TimelineEventType } from '@/types';
 import { mockRequirements, mockReviews, mockVersions, mockAnnouncements, mockUsers, mockStores } from '@/mock';
 import { generateId } from '@/utils/format';
 
@@ -13,6 +13,7 @@ interface AppState {
   stores: StoreType[];
   statusHistory: StatusHistory[];
   batchOperations: BatchOperation[];
+  savedViews: SavedView[];
   currentUser: User | null;
   filters: FilterOptions;
   addRequirement: (req: Omit<Requirement, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'statusHistory'>, asDraft?: boolean) => void;
@@ -26,8 +27,12 @@ interface AppState {
   calculateWorkload: (requirements: Requirement[]) => number;
   calculateRiskLevel: (p0Count: number, p1Count: number, workload: number, capacity: number) => 'low' | 'medium' | 'high';
   groupRequirements: (requirementIds: string[], groupBy: GroupByType) => ReviewGroup[];
+  getTimelineEvents: (requirementId: string) => TimelineEvent[];
   setFilters: (filters: Partial<FilterOptions>) => void;
   resetFilters: () => void;
+  saveView: (name: string, description?: string) => string;
+  deleteView: (viewId: string) => void;
+  applyView: (viewId: string) => void;
   addReview: (review: Omit<Review, 'id' | 'reviewedAt'>) => void;
   addVersion: (version: Omit<Version, 'id'>) => void;
   updateVersion: (id: string, updates: Partial<Version>) => void;
@@ -55,6 +60,7 @@ export const useAppStore = create<AppState>()(
       stores: mockStores,
       statusHistory: [],
       batchOperations: [],
+      savedViews: [],
       currentUser: mockUsers[0],
       filters: {},
 
@@ -631,6 +637,115 @@ export const useAppStore = create<AppState>()(
 
       getBatchOperationById: (id) => {
         return get().batchOperations.find(op => op.id === id);
+      },
+
+      getTimelineEvents: (requirementId) => {
+        const state = get();
+        const events: TimelineEvent[] = [];
+        const req = state.requirements.find(r => r.id === requirementId);
+        if (!req) return events;
+
+        events.push({
+          id: `create-${req.id}`,
+          type: 'create',
+          requirementId: req.id,
+          title: '需求创建',
+          description: req.title,
+          operatorId: req.submitterId,
+          timestamp: req.createdAt,
+        });
+
+        if (req.mergedFromIds && req.mergedFromIds.length > 0) {
+          events.push({
+            id: `merge-${req.id}`,
+            type: 'merge',
+            requirementId: req.id,
+            title: '需求合并',
+            description: `合并了 ${req.mergedFromIds.length} 个需求`,
+            operatorId: state.currentUser?.id,
+            timestamp: req.updatedAt,
+            mergedFromIds: req.mergedFromIds,
+            mergedToId: req.id,
+          });
+        }
+
+        const reviews = state.reviews.filter(r => r.requirementId === requirementId);
+        reviews.forEach(review => {
+          const batchOp = review.batchOperationId ? state.batchOperations.find(op => op.id === review.batchOperationId) : null;
+          events.push({
+            id: `review-${review.id}`,
+            type: batchOp ? 'batchReview' : 'review',
+            requirementId: req.id,
+            title: batchOp ? `批量评审 (${batchOp.summary})` : '需求评审',
+            description: review.comment,
+            operatorId: review.reviewerId,
+            timestamp: review.reviewedAt,
+            batchOperationId: review.batchOperationId,
+            reviewConclusion: review.conclusion,
+          });
+        });
+
+        req.statusHistory.forEach(history => {
+          const batchOp = history.batchOperationId ? state.batchOperations.find(op => op.id === history.batchOperationId) : null;
+          const isSchedule = history.toStatus === 'scheduled' || req.versionId;
+          
+          if (history.fromStatus !== history.toStatus) {
+            events.push({
+              id: `status-${history.id}`,
+              type: isSchedule ? 'schedule' : 'statusChange',
+              requirementId: req.id,
+              title: isSchedule ? '版本排期' : '状态变更',
+              description: history.reason || (batchOp ? batchOp.summary : undefined),
+              operatorId: history.operatorId,
+              timestamp: history.changedAt,
+              batchOperationId: history.batchOperationId,
+              fromStatus: history.fromStatus,
+              toStatus: history.toStatus,
+              versionId: req.versionId,
+            });
+          } else if (history.reason) {
+            events.push({
+              id: `update-${history.id}`,
+              type: 'update',
+              requirementId: req.id,
+              title: '备注更新',
+              description: history.reason,
+              operatorId: history.operatorId,
+              timestamp: history.changedAt,
+              batchOperationId: history.batchOperationId,
+            });
+          }
+        });
+
+        return events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      },
+
+      saveView: (name, description) => {
+        const state = get();
+        const id = generateId();
+        const newView: SavedView = {
+          id,
+          name,
+          description,
+          filters: { ...state.filters },
+          createdAt: new Date().toISOString(),
+          createdBy: state.currentUser?.id || '',
+        };
+        set({ savedViews: [newView, ...state.savedViews] });
+        return id;
+      },
+
+      deleteView: (viewId) => {
+        set((state) => ({
+          savedViews: state.savedViews.filter(v => v.id !== viewId),
+        }));
+      },
+
+      applyView: (viewId) => {
+        const view = get().savedViews.find(v => v.id === viewId);
+        if (view) {
+          set({ filters: { ...view.filters } });
+        }
       },
     }),
     {

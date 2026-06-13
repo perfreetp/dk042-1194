@@ -1,4 +1,4 @@
-import { GripVertical, MapPin, Calendar } from 'lucide-react';
+import { GripVertical, MapPin, Calendar, Eye } from 'lucide-react';
 import type { Requirement } from '@/types';
 import { useAppStore } from '@/store';
 import { Card, CardBody } from '@/components/ui/Card';
@@ -15,9 +15,10 @@ interface ReviewColumnProps {
   color: string;
   requirements: Requirement[];
   onReview: (req: Requirement) => void;
+  onViewDetail: (reqId: string) => void;
 }
 
-export function ReviewColumn({ title, icon, color, requirements, onReview }: ReviewColumnProps) {
+export function ReviewColumn({ title, icon, color, requirements, onReview, onViewDetail }: ReviewColumnProps) {
   const getStoreById = useAppStore((state) => state.getStoreById);
   const getUserById = useAppStore((state) => state.getUserById);
   
@@ -76,12 +77,27 @@ export function ReviewColumn({ title, icon, color, requirements, onReview }: Rev
                     </div>
                   </div>
                   
-                  <div className="mt-3 pt-3 border-t border-gray-100 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="mt-3 pt-3 border-t border-gray-100 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="flex-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onViewDetail(req.id);
+                      }}
+                    >
+                      <Eye className="w-4 h-4 mr-1" />
+                      详情
+                    </Button>
                     <Button
                       size="sm"
                       variant="secondary"
-                      className="w-full"
-                      onClick={() => onReview(req)}
+                      className="flex-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onReview(req);
+                      }}
                     >
                       开始评审
                     </Button>

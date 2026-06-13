@@ -15,6 +15,8 @@ interface VersionColumnProps {
   onEdit?: (version: Version) => void;
   onAnnounce?: (versionId: string) => void;
   isUnscheduled?: boolean;
+  selectedCardIds?: string[];
+  onCardSelect?: (reqId: string, e: React.MouseEvent) => void;
 }
 
 const RISK_LABELS: Record<string, string> = {
@@ -28,7 +30,7 @@ const RISK_COLORS: Record<string, string> = {
   high: 'bg-rose-100 text-rose-700',
 };
 
-export function VersionColumn({ version, requirements, onEdit, onAnnounce, isUnscheduled }: VersionColumnProps) {
+export function VersionColumn({ version, requirements, onEdit, onAnnounce, isUnscheduled, selectedCardIds, onCardSelect }: VersionColumnProps) {
   const [showMenu, setShowMenu] = useState(false);
 
   const { setNodeRef, isOver } = useDroppable({
@@ -262,7 +264,12 @@ export function VersionColumn({ version, requirements, onEdit, onAnnounce, isUns
         ) : (
           <SortableContext items={requirementIds} strategy={verticalListSortingStrategy}>
             {requirements.map((req) => (
-              <DraggableCard key={req.id} requirement={req} />
+              <DraggableCard
+                key={req.id}
+                requirement={req}
+                isSelected={selectedCardIds?.includes(req.id)}
+                onSelect={onCardSelect}
+              />
             ))}
           </SortableContext>
         )}

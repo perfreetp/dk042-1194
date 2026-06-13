@@ -1,17 +1,20 @@
 import { useMemo, useState } from 'react';
-import { BarChart3, PieChart, TrendingUp, Clock, Target, FileText, Filter, ArrowRight } from 'lucide-react';
+import { BarChart3, PieChart, TrendingUp, Clock, Target, FileText, Filter, ArrowRight, BookmarkPlus, Bookmark, Trash2, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
+import { Input } from '@/components/ui/Input';
+import { Textarea } from '@/components/ui/Textarea';
+import { Modal } from '@/components/ui/Modal';
 import { RegionChart } from './RegionChart';
 import { ModuleChart } from './ModuleChart';
 import { StatusChart } from './StatusChart';
 import { ResponseTimeChart } from './ResponseTimeChart';
 import { StatsTable } from './StatsTable';
-import { formatPercent } from '@/utils/format';
-import type { ModuleType, RequirementStatus, FilterOptions } from '@/types';
+import { formatPercent, formatDateTime } from '@/utils/format';
+import type { ModuleType, RequirementStatus, FilterOptions, SavedView } from '@/types';
 import { MODULE_LABELS, STATUS_LABELS } from '@/utils/constants';
 
 interface ChartFilters {
@@ -35,11 +38,20 @@ export default function Statistics() {
   const users = useAppStore((state) => state.users);
   const filters = useAppStore((state) => state.filters);
   const setFilters = useAppStore((state) => state.setFilters);
+  const savedViews = useAppStore((state) => state.savedViews);
+  const saveView = useAppStore((state) => state.saveView);
+  const deleteView = useAppStore((state) => state.deleteView);
+  const applyView = useAppStore((state) => state.applyView);
+  const getUserById = useAppStore((state) => state.getUserById);
 
   const [selectedRegion, setSelectedRegion] = useState<string>(filters.region ? (Array.isArray(filters.region) ? filters.region[0] : filters.region) : 'all');
   const [selectedModule, setSelectedModule] = useState<string>(filters.module ? (Array.isArray(filters.module) ? filters.module[0] : filters.module) : 'all');
   const [selectedStatus, setSelectedStatus] = useState<string>(filters.status ? (Array.isArray(filters.status) ? filters.status[0] : filters.status) : 'all');
   const [selectedPeriod, setSelectedPeriod] = useState<string>((filters.period as string) || 'all');
+  const [showSaveViewModal, setShowSaveViewModal] = useState(false);
+  const [viewName, setViewName] = useState('');
+  const [viewDescription, setViewDescription] = useState('');
+  const [selectedViewId, setSelectedViewId] = useState<string>('');
 
   const regions = Array.from(new Set(stores.map(s => s.region)));
   const regionOptions = [
@@ -176,6 +188,65 @@ export default function Statistics() {
     }, 0);
   };
 
+  const handleSaveView = () => {
+    if (!viewName.trim()) return;
+
+    const currentFilters: FilterOptions = {};
+    if (selectedRegion !== 'all') currentFilters.region = selectedRegion;
+    if (selectedModule !== 'all') currentFilters.module = selectedModule as ModuleType;
+    if (selectedStatus !== 'all') currentFilters.status = selectedStatus as RequirementStatus;
+    if (selectedPeriod !== 'all') currentFilters.period = selectedPeriod as FilterOptions['period'];
+
+    setFilters(currentFilters);
+    saveView(viewName.trim(), viewDescription.trim() || undefined);
+    setViewName('');
+    setViewDescription('');
+    setShowSaveViewModal(false);
+  };
+
+  const handleApplyView = (viewId: string) => {
+    const view = savedViews.find(v => v.id === viewId);
+    if (view) {
+      applyView(viewId);
+      setSelectedRegion(view.filters.region ? (Array.isArray(view.filters.region) ? view.filters.region[0] : view.filters.region) : 'all');
+      setSelectedModule(view.filters.module ? (Array.isArray(view.filters.module) ? view.filters.module[0] : view.filters.module) : 'all');
+      setSelectedStatus(view.filters.status ? (Array.isArray(view.filters.status) ? view.filters.status[0] : view.filters.status) : 'all');
+      setSelectedPeriod((view.filters.period as string) || 'all');
+      setSelectedViewId(viewId);
+    }
+  };
+
+  const handleDeleteView = (e: React.MouseEvent, viewId: string) => {
+    e.stopPropagation();
+    if (confirm('确定要删除这个分析视角吗？')) {
+      deleteView(viewId);
+      if (selectedViewId === viewId) {
+        setSelectedViewId('');
+      }
+    }
+  };
+
+  const buildFilterDescription = (view: SavedView) => {
+    const parts: string[] = [];
+    if (view.filters.period && view.filters.period !== 'all') {
+      const periodLabels: Record<string, string> = { '7d': '近7天', '30d': '近30天', '90d': '近90天' };
+      parts.push(periodLabels[view.filters.period] || '全部时间');
+    }
+    if (view.filters.region) {
+      const r = Array.isArray(view.filters.region) ? view.filters.region[0] : view.filters.region;
+      parts.push(`${r}区域`);
+    }
+    if (view.filters.module) {
+      const m = Array.isArray(view.filters.module) ? view.filters.module[0] : view.filters.module;
+      parts.push(MODULE_LABELS[m] || m);
+    }
+    if (view.filters.status) {
+      const s = Array.isArray(view.filters.status) ? view.filters.status[0] : view.filters.status;
+      parts.push(STATUS_LABELS[s] || s);
+    }
+    return parts.length > 0 ? parts.join(' · ') : '全部数据';
+  };
+
   const StatusLabelsMap: Record<string, RequirementStatus> = {
     '待处理': 'pending',
     '评审中': 'reviewing',
@@ -216,45 +287,111 @@ export default function Statistics() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">统计报表</h1>
           <p className="text-sm text-gray-500 mt-1">多维度分析门店诉求，跟踪闭环效果 · 点击图表可跳转看板查看明细，筛选条件自动保留</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 items-end">
+          <div className="flex items-center gap-3">
+            {savedViews.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Bookmark className="w-4 h-4 text-[#1e3a5f]" />
+                <Select
+                  placeholder="选择分析视角"
+                  value={selectedViewId}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      handleApplyView(e.target.value);
+                    } else {
+                      setSelectedViewId('');
+                    }
+                  }}
+                  options={[
+                    { value: '', label: '自定义' },
+                    ...savedViews.map(v => ({ value: v.id, label: v.name })),
+                  ]}
+                  className="w-44 h-9 text-sm"
+                />
+              </div>
+            )}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowSaveViewModal(true)}
+            >
+              <BookmarkPlus className="w-4 h-4 mr-1.5" />
+              保存视角
+            </Button>
+            <Button variant="outline" size="sm">
+              <FileText className="w-4 h-4 mr-1.5" />
+              导出报表
+            </Button>
+          </div>
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-gray-400" />
             <Select
               value={selectedPeriod}
-              onChange={(e) => setSelectedPeriod(e.target.value)}
+              onChange={(e) => { setSelectedPeriod(e.target.value); setSelectedViewId(''); }}
               options={periodOptions}
               className="w-28 h-9 text-sm"
             />
             <Select
               value={selectedRegion}
-              onChange={(e) => setSelectedRegion(e.target.value)}
+              onChange={(e) => { setSelectedRegion(e.target.value); setSelectedViewId(''); }}
               options={regionOptions}
               className="w-28 h-9 text-sm"
             />
             <Select
               value={selectedModule}
-              onChange={(e) => setSelectedModule(e.target.value)}
+              onChange={(e) => { setSelectedModule(e.target.value); setSelectedViewId(''); }}
               options={moduleOptions}
               className="w-28 h-9 text-sm"
             />
             <Select
               value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
+              onChange={(e) => { setSelectedStatus(e.target.value); setSelectedViewId(''); }}
               options={statusOptions}
               className="w-28 h-9 text-sm"
             />
           </div>
-          <Button variant="outline" size="sm">
-            <FileText className="w-4 h-4 mr-1.5" />
-            导出报表
-          </Button>
         </div>
       </div>
+
+      {savedViews.length > 0 && (
+        <div className="mb-6 flex gap-2 flex-wrap">
+          {savedViews.map((view) => {
+            const creator = getUserById(view.createdBy);
+            const isActive = selectedViewId === view.id;
+            return (
+              <div
+                key={view.id}
+                onClick={() => handleApplyView(view.id)}
+                className={`group relative flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-all ${
+                  isActive
+                    ? 'bg-[#1e3a5f]/10 border-[#1e3a5f]/30'
+                    : 'bg-white border-gray-200 hover:border-[#1e3a5f]/30 hover:bg-gray-50'
+                }`}
+              >
+                <Bookmark className={`w-4 h-4 ${isActive ? 'text-[#1e3a5f]' : 'text-gray-400'}`} />
+                <div className="flex flex-col">
+                  <span className={`text-sm font-medium ${isActive ? 'text-[#1e3a5f]' : 'text-gray-700'}`}>
+                    {view.name}
+                  </span>
+                  <span className="text-xs text-gray-500">{buildFilterDescription(view)}</span>
+                </div>
+                <button
+                  onClick={(e) => handleDeleteView(e, view.id)}
+                  className="absolute -top-1 -right-1 w-5 h-5 bg-rose-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                  title="删除"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="grid grid-cols-6 gap-4 mb-6">
         <Card>
@@ -399,6 +536,50 @@ export default function Statistics() {
       </div>
 
       <StatsTable filters={chartFilters} />
+
+      <Modal
+        isOpen={showSaveViewModal}
+        onClose={() => setShowSaveViewModal(false)}
+        title="保存分析视角"
+        size="md"
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button variant="outline" onClick={() => setShowSaveViewModal(false)}>取消</Button>
+            <Button onClick={handleSaveView} disabled={!viewName.trim()}>保存</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <Input
+              label="视角名称"
+              placeholder="如：华东区会员模块近30天"
+              value={viewName}
+              onChange={(e) => setViewName(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <div>
+            <Textarea
+              label="描述说明（可选）"
+              placeholder="描述这个分析视角的用途..."
+              value={viewDescription}
+              onChange={(e) => setViewDescription(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+            <p className="text-xs text-gray-500 mb-2">将保存当前筛选组合：</p>
+            <p className="text-sm text-gray-700">
+              {selectedPeriod !== 'all' && `${selectedPeriod === '7d' ? '近7天' : selectedPeriod === '30d' ? '近30天' : '近90天'} · `}
+              {selectedRegion !== 'all' && `${selectedRegion}区域 · `}
+              {selectedModule !== 'all' && `${MODULE_LABELS[selectedModule as keyof typeof MODULE_LABELS]} · `}
+              {selectedStatus !== 'all' && `${STATUS_LABELS[selectedStatus as keyof typeof STATUS_LABELS]} · `}
+              <span className="text-[#1e3a5f] font-medium">{totalCount} 条数据</span>
+            </p>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
